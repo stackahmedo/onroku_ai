@@ -1,0 +1,51 @@
+# Transcript AI V2  –  .gitignore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+venv/
+.env
+*.egg-info/
+
+# Node
+node_modules/
+build/
+dist/
+
+# Storage (data dirs, not tracked)
+app/storage/uploads/
+app/storage/chunks/
+app/storage/transcripts/
+app/storage/exports/
+app/database/app.db
+app/storage/*.db
+*.db
+
+
+# Models (large binary files)
+app/models/whisper/
+app/models/pyannote/
+models/hf_token.txt
+
+# Electron builder
+out/
+release/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Local secrets & test audio
+hf_token.txt
+*.wav
+*.mp3
+.deps_v2_installed
+
