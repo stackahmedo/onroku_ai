@@ -205,6 +205,14 @@ ipcMain.handle('file:open-directory-dialog', async () => {
 
 // ── IPC: File dialogs ──────────────────────────────────────
 
+ipcMain.handle('file:select-directory-path', async () => {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: '保存先フォルダを選択 / Select Save Folder',
+    properties: ['openDirectory'],
+  });
+  return result.canceled || result.filePaths.length === 0 ? null : result.filePaths[0];
+});
+
 ipcMain.handle('file:open-dialog', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     title: '音声ファイルを選択 / Select Audio Files',

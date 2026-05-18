@@ -60,6 +60,15 @@ const ja = {
   sttModel: "STTモデル",
   createdAt: "作成日時",
   duration: "音声の長さ",
+  tabHistory: "文字起こし履歴",
+  tabSettings: "アプリ設定",
+  settingsExportPath: "出力ファイルの直接保存先フォルダ",
+  settingsExportPathDesc: "エクスポート時（.txt, .csv, .xlsx）に書き出されるカスタムフォルダパスを設定します。未設定の場合、デフォルトのアプリ内フォルダに保存されます。",
+  settingsSaveSuccess: "設定を保存しました",
+  settingsSaveFailed: "設定の保存に失敗しました",
+  devLogsTitle: "FastAPI開発者用バックグラウンドコンソール",
+  btnRefreshLogs: "ログ更新",
+  btnScrollToggle: "自動スクロール",
 };
 
 export default ja;

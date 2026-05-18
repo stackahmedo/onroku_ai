@@ -60,6 +60,15 @@ const en = {
   sttModel: "STT Model",
   createdAt: "Created At",
   duration: "Duration",
+  tabHistory: "History",
+  tabSettings: "Settings",
+  settingsExportPath: "Direct Transcript Export Location",
+  settingsExportPathDesc: "Set a custom folder path where transcript exports (.txt, .csv, .xlsx) are written. If empty, the default application folder is used.",
+  settingsSaveSuccess: "Settings saved successfully",
+  settingsSaveFailed: "Failed to save settings",
+  devLogsTitle: "FastAPI Developer Console",
+  btnRefreshLogs: "Refresh Logs",
+  btnScrollToggle: "Auto-Scroll",
 };
 
 export default en;

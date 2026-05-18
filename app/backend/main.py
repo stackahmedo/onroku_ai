@@ -31,22 +31,64 @@ from export_service import export_transcript
 from hardware_detector import detect_hardware
 from transcription_service import TranscriptionService, cancel_job, pause_job, resume_job
 
-# ── Logging ────────────────────────────────────────────────────────
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
+# ── Logging & Path Setup ───────────────────────────────────────────
+BASE_DIR       = Path(__file__).parent.parent.parent
+UPLOAD_DIR     = BASE_DIR / "app" / "storage" / "uploads"
+TRANSCRIPT_DIR  = BASE_DIR / "app" / "storage" / "transcripts"
+EXPORT_DIR     = BASE_DIR / "app" / "storage" / "exports"
+DB_PATH        = BASE_DIR / "app" / "database" / "app.db"
+LOGS_DIR       = BASE_DIR / "app" / "storage" / "logs"
+SETTINGS_FILE  = BASE_DIR / "app" / "storage" / "settings.json"
+
+for d in [UPLOAD_DIR, TRANSCRIPT_DIR, EXPORT_DIR, DB_PATH.parent, LOGS_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
+LOG_FILE = LOGS_DIR / "backend.log"
+
+# Clean up older backend logs on startup so the file doesn't grow infinitely
+if LOG_FILE.exists():
+    try:
+        with open(LOG_FILE, "w", encoding="utf-8") as f:
+            f.truncate(0)
+    except:
+        pass
+
+# Configure root logger with custom formatters to write to both stdout and backend.log
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+
+formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+
+# Console Handler
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+root_logger.addHandler(console_handler)
+
+# File Handler for developer background logs
+file_handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+file_handler.setFormatter(formatter)
+root_logger.addHandler(file_handler)
+
 logger = logging.getLogger(__name__)
 
-# ── Paths ───────────────────────────────────────────────────────────
-BASE_DIR      = Path(__file__).parent.parent.parent
-UPLOAD_DIR    = BASE_DIR / "app" / "storage" / "uploads"
-TRANSCRIPT_DIR = BASE_DIR / "app" / "storage" / "transcripts"
-EXPORT_DIR    = BASE_DIR / "app" / "storage" / "exports"
-DB_PATH       = BASE_DIR / "app" / "database" / "app.db"
+# ── Settings helper functions ──────────────────────────────────────
+def load_settings():
+    if SETTINGS_FILE.exists():
+        try:
+            with open(SETTINGS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Failed to read settings: {e}")
+    return {"transcript_export_dir": str(EXPORT_DIR)}
 
-for d in [UPLOAD_DIR, TRANSCRIPT_DIR, EXPORT_DIR, DB_PATH.parent]:
-    d.mkdir(parents=True, exist_ok=True)
+
+def save_settings(settings: dict):
+    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
+            json.dump(settings, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.error(f"Failed to write settings: {e}")
 
 # ── Hardware detection (done once at startup) ───────────────────────
 HARDWARE = detect_hardware()
@@ -322,7 +364,15 @@ async def export(job_id: str, format: str = Query(default="excel")):
     ext_map = {"txt": "txt", "csv": "csv", "excel": "xlsx"}
 
     try:
-        out_path = export_transcript(job["transcript_file"], format, EXPORT_DIR)
+        settings = load_settings()
+        custom_dir = settings.get("transcript_export_dir")
+        if custom_dir:
+            target_dir = Path(custom_dir)
+            target_dir.mkdir(parents=True, exist_ok=True)
+        else:
+            target_dir = EXPORT_DIR
+
+        out_path = export_transcript(job["transcript_file"], format, target_dir)
         filename = f"transcript_{job_id[:8]}.{ext_map[format]}"
         return FileResponse(
             out_path,
@@ -393,6 +443,42 @@ async def rename_speakers(job_id: str, payload: dict = Body(...)):
         db_service.save_transcript(job_id, str(transcript_path), len(segments), speakers)
         
     return {"message": "Speakers renamed successfully", "speaker_count": len({s["speaker"] for s in segments})}
+
+
+# ── Settings & Logs Endpoints ─────────────────────────────────────
+
+@app.get("/settings")
+async def get_settings():
+    return load_settings()
+
+
+@app.post("/settings")
+async def update_settings(payload: dict):
+    settings = load_settings()
+    if "transcript_export_dir" in payload:
+        path_str = payload["transcript_export_dir"]
+        if path_str:
+            p = Path(path_str)
+            try:
+                p.mkdir(parents=True, exist_ok=True)
+            except Exception as e:
+                raise HTTPException(status_code=400, detail=f"Invalid folder path: {e}")
+        settings["transcript_export_dir"] = path_str
+    save_settings(settings)
+    return settings
+
+
+@app.get("/logs")
+async def get_logs(limit: int = 150):
+    if not LOG_FILE.exists():
+        return {"logs": []}
+    try:
+        with open(LOG_FILE, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+        recent = lines[-limit:] if len(lines) > limit else lines
+        return {"logs": [line.strip() for line in recent]}
+    except Exception as e:
+        return {"logs": [f"Error reading logs: {e}"]}
 
 
 if __name__ == "__main__":

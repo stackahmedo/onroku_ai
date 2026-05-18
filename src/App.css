@@ -1137,3 +1137,280 @@ html, body {
   .app-main { grid-template-columns: 1fr; gap: 20px; padding: 20px; }
   .sidebar  { order: -1; }
 }
+
+/* ── Sidebar Loaded Files Queue ────────────────────── */
+.selected-files-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(135deg, rgba(10, 15, 36, 0.4) 0%, rgba(6, 8, 19, 0.6) 100%);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+  max-height: 320px;
+  overflow: hidden;
+}
+
+.selected-files-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2px;
+}
+
+.selected-files-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.8px;
+  color: var(--clr-text-muted);
+}
+
+.selected-files-count {
+  font-size: 11px;
+  font-weight: 700;
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  color: #60a5fa;
+  padding: 1px 8px;
+  border-radius: 99px;
+}
+
+.selected-file-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.selected-file-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--clr-border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  font-size: 12px;
+  transition: all var(--transition);
+}
+
+.selected-file-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.selected-file-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.selected-file-name {
+  color: var(--clr-text);
+  font-weight: 500;
+  text-overflow: ellipsis;
+  overflow: hidden;
+  white-space: nowrap;
+  flex: 1;
+  text-align: left;
+}
+
+.selected-file-size {
+  color: var(--clr-text-muted);
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.selected-file-remove {
+  background: transparent;
+  border: none;
+  color: var(--clr-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 2px;
+  transition: color 0.2s;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.selected-file-remove:hover {
+  color: var(--clr-error);
+}
+
+/* ── Navigation Tabs ───────────────────────────────── */
+.tabs-nav-wrapper {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--clr-border);
+  padding-bottom: 10px;
+}
+
+.tabs-nav {
+  display: flex;
+  gap: 8px;
+}
+
+.tab-btn {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--clr-text-muted);
+  padding: 6px 16px;
+  border-radius: 99px;
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.tab-btn:hover {
+  color: var(--clr-text);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.tab-btn--active {
+  background: rgba(59, 130, 246, 0.08) !important;
+  border-color: rgba(59, 130, 246, 0.3) !important;
+  color: #60a5fa !important;
+  box-shadow: 0 0 15px rgba(59, 130, 246, 0.1);
+}
+
+/* ── Developer Terminal Console ────────────────────── */
+.settings-section {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.settings-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.settings-label {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--clr-text);
+  text-align: left;
+}
+
+.settings-path-row {
+  display: flex;
+  gap: 10px;
+}
+
+.settings-input-path {
+  flex: 1;
+  background: rgba(10, 15, 36, 0.5);
+  border: 1px solid var(--clr-border2);
+  border-radius: var(--radius-sm);
+  color: var(--clr-text);
+  padding: 10px 14px;
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 12.5px;
+  transition: all var(--transition);
+}
+
+.settings-input-path:focus {
+  outline: none;
+  border-color: var(--clr-accent);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.15);
+}
+
+.btn-settings-save {
+  align-self: flex-start;
+  padding: 10px 24px;
+  font-size: 13px;
+}
+
+/* Dev Terminal styling */
+.dev-terminal {
+  display: flex;
+  flex-direction: column;
+  background: #03050a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card), inset 0 0 20px rgba(0, 0, 0, 0.8);
+  overflow: hidden;
+  height: 400px;
+}
+
+.terminal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.02);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  padding: 8px 16px;
+}
+
+.terminal-title {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: #10b981; /* Glowing Green title */
+  letter-spacing: 0.5px;
+}
+
+.terminal-controls {
+  display: flex;
+  gap: 8px;
+}
+
+.btn-terminal {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--clr-text-muted);
+  padding: 3px 10px;
+  border-radius: 4px;
+  font-family: inherit;
+  font-size: 10.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+
+.btn-terminal:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.terminal-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  text-align: left;
+}
+
+.log-line {
+  font-family: 'Consolas', 'Courier New', monospace;
+  font-size: 11.5px;
+  color: #e2e8f0;
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.5;
+}
+
+.log-line--info {
+  color: #cbd5e1;
+}
+
+.log-line--warn {
+  color: #f59e0b; /* Amber warn */
+}
+
+.log-line--error {
+  color: #f43f5e; /* Red error */
+}
