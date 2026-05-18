@@ -563,6 +563,16 @@ class TranscriptionService:
                         "text":  sub_text,
                     })
 
+            # Renumber speakers serially in chronological order of appearance
+            speaker_mapping = {}
+            next_speaker_num = 1
+            for seg in final_segments:
+                spk = seg["speaker"]
+                if spk not in speaker_mapping:
+                    speaker_mapping[spk] = f"Speaker {next_speaker_num}"
+                    next_speaker_num += 1
+                seg["speaker"] = speaker_mapping[spk]
+
             logger.info(f"Diarization complete. Aligned and split into {len(final_segments)} segments.")
             return final_segments
 
