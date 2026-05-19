@@ -97,6 +97,7 @@ export default function DropZone({ onFilesSelected, t }: DropZoneProps) {
             }
           }}
           id="file-input-hidden"
+          title="Select audio or video files"
         />
 
         <input
@@ -111,6 +112,7 @@ export default function DropZone({ onFilesSelected, t }: DropZoneProps) {
             }
           }}
           id="folder-input-hidden"
+          title="Select folder containing audio or video files"
         />
 
         <div className="dropzone__icon">

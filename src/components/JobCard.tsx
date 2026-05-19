@@ -353,6 +353,8 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
                       className="speaker-editor-input"
                       value={editMap[spk] || ''}
                       onChange={(e) => setEditMap({ ...editMap, [spk]: e.target.value })}
+                      title={`Rename speaker ${spk}`}
+                      placeholder={spk}
                     />
                   </div>
                 ))}

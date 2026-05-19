@@ -521,10 +521,10 @@ export default function App() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
         <div>
-          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+          <label htmlFor="pdf-maker-format-select" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
             Output format
           </label>
-          <select value={txtOutputFormat} onChange={(e) => setTxtOutputFormat(e.target.value)} style={pdfMakerFieldStyle}>
+          <select id="pdf-maker-format-select" title="Output format" value={txtOutputFormat} onChange={(e) => setTxtOutputFormat(e.target.value)} style={pdfMakerFieldStyle}>
             <option value="pdf">PDF</option>
             <option value="doc">DOC</option>
             <option value="xlsx">XLSX</option>
@@ -537,10 +537,12 @@ export default function App() {
         
         {/* Template Select */}
         <div>
-          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+          <label htmlFor="pdf-maker-template-select" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
             🎨 {uiLang === 'ja' ? 'PDFデザインテンプレート' : 'PDF Design Template'}
           </label>
           <select
+            id="pdf-maker-template-select"
+            title={uiLang === 'ja' ? 'PDFデザインテンプレート' : 'PDF Design Template'}
             value={txtPdfTemplate}
             onChange={(e) => setTxtPdfTemplate(e.target.value)}
             className="settings-select"
@@ -633,12 +635,12 @@ export default function App() {
             <input type="text" value={txtFooter} onChange={(e) => setTxtFooter(e.target.value)} placeholder="Confidential / notes" style={pdfMakerFieldStyle} />
           </div>
           <div>
-            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Watermark</label>
-            <input type="text" value={txtWatermark} onChange={(e) => setTxtWatermark(e.target.value)} placeholder="DRAFT" style={pdfMakerFieldStyle} />
+            <label htmlFor="pdf-maker-watermark-input" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Watermark</label>
+            <input id="pdf-maker-watermark-input" title="Watermark text" type="text" value={txtWatermark} onChange={(e) => setTxtWatermark(e.target.value)} placeholder="DRAFT" style={pdfMakerFieldStyle} />
           </div>
           <div>
-            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Page Layout</label>
-            <select value={txtPageLayout} onChange={(e) => setTxtPageLayout(e.target.value)} style={pdfMakerFieldStyle}>
+            <label htmlFor="pdf-maker-page-layout-select" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Page Layout</label>
+            <select id="pdf-maker-page-layout-select" title="Page Layout" value={txtPageLayout} onChange={(e) => setTxtPageLayout(e.target.value)} style={pdfMakerFieldStyle}>
               <option value="table">Standard table</option>
               <option value="wide">Wide transcript</option>
               <option value="compact">Compact pages</option>
@@ -654,8 +656,10 @@ export default function App() {
         </div>
 
         <div>
-          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Custom Font Upload</label>
+          <label htmlFor="pdf-maker-custom-font-file" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Custom Font Upload</label>
           <input
+            id="pdf-maker-custom-font-file"
+            title="Custom Font File"
             type="file"
             accept=".ttf,.ttc,.otf"
             onChange={(e) => {
@@ -676,8 +680,8 @@ export default function App() {
         </div>
         {txtSilenceDetection && (
           <div>
-            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Silence Threshold Seconds</label>
-            <input type="number" min="1" max="60" step="0.5" value={txtSilenceThreshold} onChange={(e) => setTxtSilenceThreshold(e.target.value)} style={pdfMakerFieldStyle} />
+            <label htmlFor="pdf-maker-silence-threshold" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Silence Threshold Seconds</label>
+            <input id="pdf-maker-silence-threshold" title="Silence Threshold Seconds" placeholder="5.0" type="number" min="1" max="60" step="0.5" value={txtSilenceThreshold} onChange={(e) => setTxtSilenceThreshold(e.target.value)} style={pdfMakerFieldStyle} />
           </div>
         )}
       </div>
@@ -1317,8 +1321,10 @@ export default function App() {
 
                   <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
                     <div style={{ flex: 1 }}>
-                      <label className="settings-label" style={{ display: 'block', marginBottom: '6px' }}>{t.txtConvLabelSelectFile}</label>
+                      <label htmlFor="txt-conv-file-input" className="settings-label" style={{ display: 'block', marginBottom: '6px' }}>{t.txtConvLabelSelectFile}</label>
                       <input
+                        id="txt-conv-file-input"
+                        title="Select text file"
                         type="file"
                         accept=".txt"
                         onChange={handleTxtFileChange}
@@ -1340,10 +1346,12 @@ export default function App() {
                       <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)', padding: '12px', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px', flex: 1 }}>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                           <div>
-                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                            <label htmlFor="txt-conv-min-chars-input" className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
                               📄 {t.txtConvLabelMinChars}
                             </label>
                             <input
+                              id="txt-conv-min-chars-input"
+                              title="Minimum Characters"
                               type="number"
                               min="50"
                               value={txtMaxChars}
@@ -1352,10 +1360,12 @@ export default function App() {
                             />
                           </div>
                           <div>
-                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                            <label htmlFor="txt-conv-template-select" className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
                               🎨 {uiLang === 'ja' ? 'テンプレート' : 'Template'}
                             </label>
                             <select
+                              id="txt-conv-template-select"
+                              title="Template"
                               value={txtPdfTemplate}
                               onChange={(e) => setTxtPdfTemplate(e.target.value)}
                               style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
@@ -1468,11 +1478,13 @@ export default function App() {
                     
                     {/* Compaction Slider / Number */}
                     <div>
-                      <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+                      <label htmlFor="txt-conv-min-chars-slider" className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
                         📄 {t.txtConvLabelMinChars}
                       </label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
+                          id="txt-conv-min-chars-slider"
+                          title="Minimum characters slider"
                           type="range"
                           min="100"
                           max="5000"
@@ -1482,6 +1494,9 @@ export default function App() {
                           style={{ flex: 1, cursor: 'pointer' }}
                         />
                         <input
+                          id="txt-conv-min-chars-number"
+                          title="Minimum characters input"
+                          placeholder="1000"
                           type="number"
                           min="50"
                           value={txtMaxChars}
