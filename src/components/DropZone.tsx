@@ -1,4 +1,4 @@
-import React, { useRef, useState, useCallback, DragEvent, KeyboardEvent } from 'react';
+import React, { useRef, useState, useCallback, DragEvent } from 'react';
 
 const MAX_SIZE_GB = 3;
 const MAX_BYTES = MAX_SIZE_GB * 1024 ** 3;
@@ -80,9 +80,6 @@ export default function DropZone({ onFilesSelected, t }: DropZoneProps) {
         onDragLeave={() => setDragging(false)}
         onDrop={onDrop}
         onClick={onBrowse}
-        role="button"
-        tabIndex={0}
-        onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => e.key === 'Enter' && onBrowse()}
         id="dropzone-area"
       >
         <input

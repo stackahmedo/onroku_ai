@@ -267,7 +267,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
     : '';
 
   return (
-    <div className={`job-card job-card--${job.status}`} id={`job-${job.id.substring(0, 8)}`}>
+    <div className={`job-card job-card--${job.status}`} id={`job-${job.id}`}>
       {/* Header */}
       <div className="job-card__header">
         <div className="job-card__title">
@@ -433,7 +433,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
       <div className="job-card__actions">
         {(isDone || job.status === 'failed' || job.status === 'cancelled') && (
           <button
-            id={`meta-${job.id.substring(0,8)}`}
+            id={`meta-${job.id}`}
             className={`btn btn-export btn-metadata ${showMetadata ? 'btn-metadata--active' : ''}`}
             onClick={() => setShowMetadata(!showMetadata)}
             disabled={exporting}
@@ -442,38 +442,38 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         {isDone && (
           <>
             <button
-              id={`edit-speakers-${job.id.substring(0,8)}`}
+              id={`edit-speakers-${job.id}`}
               className={`btn btn-export btn-edit-speakers ${showEdit ? 'btn-edit-speakers--active' : ''}`}
               onClick={toggleEditSpeakers}
               disabled={exporting}
             >👥 {t.editSpeakers}</button>
             <button
-              id={`export-txt-${job.id.substring(0,8)}`}
+              id={`export-txt-${job.id}`}
               className="btn btn-export btn-txt"
               onClick={() => handleExport('txt')}
               disabled={exporting}
             >📄 {t.exportTxt}</button>
             <button
-              id={`export-doc-${job.id.substring(0,8)}`}
+              id={`export-doc-${job.id}`}
               className="btn btn-export btn-doc"
               onClick={() => handleExport('doc')}
               disabled={exporting}
               style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.15)' }}
             >📝 {t.exportDoc || 'DOC'}</button>
             <button
-              id={`export-csv-${job.id.substring(0,8)}`}
+              id={`export-csv-${job.id}`}
               className="btn btn-export btn-csv"
               onClick={() => handleExport('csv')}
               disabled={exporting}
             >CSV</button>
             <button
-              id={`export-xlsx-${job.id.substring(0,8)}`}
+              id={`export-xlsx-${job.id}`}
               className="btn btn-export btn-xlsx"
               onClick={() => handleExport('xlsx')}
               disabled={exporting}
             >XLSX</button>
             <button
-              id={`export-pdf-${job.id.substring(0,8)}`}
+              id={`export-pdf-${job.id}`}
               className="btn btn-export btn-pdf"
               onClick={() => handleExport('pdf')}
               disabled={exporting}
@@ -484,26 +484,26 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
           <>
             {job.status === 'paused' ? (
               <button
-                id={`resume-${job.id.substring(0,8)}`}
+                id={`resume-${job.id}`}
                 className="btn btn-resume"
                 onClick={handleResume}
               >▶ {t.resumeJob}</button>
             ) : (
               <button
-                id={`pause-${job.id.substring(0,8)}`}
+                id={`pause-${job.id}`}
                 className="btn btn-pause"
                 onClick={handlePause}
               >⏸ {t.pauseJob}</button>
             )}
             <button
-              id={`cancel-${job.id.substring(0,8)}`}
+              id={`cancel-${job.id}`}
               className="btn btn-cancel"
               onClick={handleCancel}
             >{t.cancelJob}</button>
           </>
         )}
         <button
-          id={`delete-${job.id.substring(0,8)}`}
+          id={`delete-${job.id}`}
           className="btn btn-delete"
           onClick={handleDelete}
         >{t.deleteJob}</button>
