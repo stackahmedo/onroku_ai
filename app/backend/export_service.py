@@ -5,6 +5,7 @@ Each segment: { start: float, end: float, speaker: str, text: str }
 """
 
 import csv
+import html
 import json
 import logging
 from pathlib import Path
@@ -65,6 +66,7 @@ def export_txt(segments: List[Dict], export_path: Path) -> Path:
         for seg in segments:
             time_str = _fmt_time(seg.get("start", 0))
             speaker = seg.get("speaker", "Unknown")
+            raw_text = seg.get("text", "").strip()
             # Translate default "Speaker N" to "話者N" for Japanese style
             if speaker.startswith("Speaker "):
                 speaker = speaker.replace("Speaker ", "話者")
@@ -123,6 +125,15 @@ def export_doc(segments: List[Dict], export_path: Path) -> Path:
             if speaker.startswith("Speaker "):
                 speaker = speaker.replace("Speaker ", "話者")
             text = seg.get("text", "").strip().replace("\n", "<br/>")
+            if speaker.startswith("Speaker "):
+                speaker = speaker.replace("Speaker ", "話者")
+            speaker = html.escape(speaker)
+            raw_text = seg.get("text", "").strip()
+            speaker = seg.get("speaker", "Unknown")
+            if speaker.startswith("Speaker "):
+                speaker = f"話者{speaker[len('Speaker '):]}"
+            speaker = html.escape(speaker)
+            text = html.escape(raw_text).replace("\n", "<br/>")
             
             f.write(
                 "<tr>\n"
@@ -220,6 +231,35 @@ def export_excel(segments: List[Dict], export_path: Path) -> Path:
     return export_path
 
 
+def export_json(segments: List[Dict], export_path: Path) -> Path:
+    """Export transcript segments as UTF-8 JSON."""
+    export_path = Path(export_path).with_suffix(".json")
+    with open(export_path, "w", encoding="utf-8") as f:
+        json.dump(segments, f, ensure_ascii=False, indent=2)
+    logger.info(f"JSON exported: {export_path}")
+    return export_path
+
+
+def export_html(segments: List[Dict], export_path: Path) -> Path:
+    """Export transcript segments as a portable HTML table."""
+    export_path = Path(export_path).with_suffix(".html")
+    with open(export_path, "w", encoding="utf-8") as f:
+        f.write("<!doctype html><html><head><meta charset='utf-8'><title>Transcript</title>")
+        f.write("<style>body{font-family:Arial,'Noto Sans JP',sans-serif;margin:32px;color:#111827}table{border-collapse:collapse;width:100%}th,td{border:1px solid #d1d5db;padding:8px;vertical-align:top}th{background:#111827;color:#fff;text-align:left}tr:nth-child(even){background:#f9fafb}</style>")
+        f.write("</head><body><h1>Transcript</h1><table><thead><tr><th>Time</th><th>Speaker</th><th>Text</th></tr></thead><tbody>")
+        for seg in segments:
+            f.write(
+                "<tr>"
+                f"<td>{html.escape(_fmt_range(seg.get('start', 0), seg.get('end', 0)))}</td>"
+                f"<td>{html.escape(str(seg.get('speaker', 'Unknown')))}</td>"
+                f"<td>{html.escape(str(seg.get('text', '')).strip())}</td>"
+                "</tr>"
+            )
+        f.write("</tbody></table></body></html>")
+    logger.info(f"HTML exported: {export_path}")
+    return export_path
+
+
 def export_pdf(
     segments: List[Dict],
     export_path: Path,
@@ -228,7 +268,16 @@ def export_pdf(
     job_filename: Optional[str] = None,
     job_duration: Union[float, str, None] = None,
     font_size: Optional[float] = None,
-    row_padding: Optional[float] = None
+    row_padding: Optional[float] = None,
+    speaker_colors: Optional[Dict[str, str]] = None,
+    custom_header: Optional[str] = None,
+    custom_footer: Optional[str] = None,
+    watermark: Optional[str] = None,
+    vertical_japanese: bool = False,
+    page_layout: str = "table",
+    auto_page_numbers: bool = True,
+    smart_speaker_styling: bool = True,
+    custom_font_path: Optional[str] = None
 ) -> Path:
     """Export formatted A4 PDF transcript using ReportLab, dynamically styled by the selected template."""
     try:
@@ -249,12 +298,15 @@ def export_pdf(
     japanese_font_name = "Helvetica"
     font_registered = False
 
-    font_paths = [
+    font_paths = []
+    if custom_font_path:
+        font_paths.append(str(custom_font_path))
+    font_paths.extend([
         r"C:\Windows\Fonts\yugothm.ttc",
         r"C:\Windows\Fonts\msgothic.ttc",
         r"C:\Windows\Fonts\meiryo.ttc",
         r"C:\Windows\Fonts\msmincho.ttc",
-    ]
+    ])
 
     for fp in font_paths:
         if os.path.exists(fp):
@@ -427,6 +479,16 @@ def export_pdf(
         t_opt["leading"] = float(font_size) + 3.0
     if row_padding is not None:
         t_opt["padding"] = float(row_padding)
+    if vertical_japanese:
+        t_opt["fontSize"] = min(float(t_opt["fontSize"]), 8.5)
+        t_opt["leading"] = t_opt["fontSize"] + 3.5
+        t_opt["banner_text"] = "SmartGrid Transcript AI - Vertical Japanese Layout"
+    if page_layout == "wide":
+        t_opt["margin_lr"] = 16
+    elif page_layout == "compact":
+        t_opt["padding"] = min(float(t_opt["padding"]), 1.5)
+        t_opt["fontSize"] = min(float(t_opt["fontSize"]), 7.5)
+        t_opt["leading"] = t_opt["fontSize"] + 2.0
 
     # 2. Paginate segments based on max characters per page
     pages_data = [[]]
@@ -540,10 +602,12 @@ def export_pdf(
             if speaker.startswith("Speaker "):
                 speaker = speaker.replace("Speaker ", "話者")
             text = seg.get("text", "").strip()
+            if vertical_japanese:
+                text = "<br/>".join(list(text))
 
             table_data.append([
                 Paragraph(time_str, body_cell_center),
-                Paragraph(speaker, body_cell_center),
+                Paragraph(f"<b>{speaker}</b>" if smart_speaker_styling else speaker, body_cell_center),
                 Paragraph(text, body_cell_left)
             ])
 
@@ -583,6 +647,20 @@ def export_pdf(
         for row_idx in range(1, len(table_data)):
             bg = t_opt["row_alt_bg"] if row_idx % 2 == 0 else t_opt["row_base_bg"]
             t_styles.append(('BACKGROUND', (0, row_idx), (-1, row_idx), bg))
+            if smart_speaker_styling and speaker_colors:
+                row_speaker = page_segs[row_idx - 1].get("speaker", "Unknown")
+                normalized_row_speaker = row_speaker
+                if isinstance(normalized_row_speaker, str) and normalized_row_speaker.startswith("Speaker "):
+                    normalized_row_speaker = f"話者{normalized_row_speaker[len('Speaker '):]}"
+                if isinstance(row_speaker, str) and row_speaker.startswith("Speaker "):
+                    row_speaker = row_speaker.replace("Speaker ", "è©±è€…")
+                try:
+                    color = speaker_colors.get(normalized_row_speaker) or speaker_colors.get(row_speaker)
+                    if color:
+                        t_styles.append(('BACKGROUND', (1, row_idx), (1, row_idx), colors.HexColor(color)))
+                        t_styles.append(('TEXTCOLOR', (1, row_idx), (1, row_idx), colors.white))
+                except Exception:
+                    pass
 
         t.setStyle(TableStyle(t_styles))
         story.append(t)
@@ -597,9 +675,18 @@ def export_pdf(
         margin = t_opt["margin_lr"]
         width_end = 595.27 - margin
 
+        if watermark:
+            canvas.saveState()
+            canvas.setFont(t_opt["font"], 42)
+            canvas.setFillColor(colors.Color(0.5, 0.5, 0.5, alpha=0.12))
+            canvas.translate(297.63, 420.94)
+            canvas.rotate(35)
+            canvas.drawCentredString(0, 0, str(watermark)[:80])
+            canvas.restoreState()
+
         # Top page header line (skip if compact_terminal)
         if pdf_template != "compact_terminal":
-            canvas.drawString(margin, 841.89 - margin + 12, t_opt["banner_text"])
+            canvas.drawString(margin, 841.89 - margin + 12, custom_header or t_opt["banner_text"])
             canvas.setStrokeColor(t_opt["line_color"])
             canvas.setLineWidth(0.5)
             canvas.line(margin, 841.89 - margin + 6, width_end, 841.89 - margin + 6)
@@ -611,7 +698,8 @@ def export_pdf(
             formatted_duration = job_duration.strip()
         else:
             formatted_duration = "00:00"
-        footer_text = f"ファイル名 / File: {job_filename or 'Unknown'}   |   録音時間 / Duration: {formatted_duration}   |   ページ {doc.page} / Page {doc.page}"
+        page_part = f"   |   Page {doc.page}" if auto_page_numbers else ""
+        footer_text = custom_footer or f"File: {job_filename or 'Unknown'}   |   Duration: {formatted_duration}{page_part}"
         canvas.drawCentredString(297.63, 15, footer_text)
         canvas.restoreState()
 
@@ -642,6 +730,16 @@ def export_transcript(
         out = export_txt(segments, base_path)
     elif format == "doc":
         out = export_doc(segments, base_path)
+    elif format == "docx":
+        out = export_doc(segments, base_path.with_suffix(".docx"))
+    elif format == "csv":
+        out = export_csv(segments, base_path)
+    elif format in ("xlsx", "excel"):
+        out = export_excel(segments, base_path)
+    elif format == "html":
+        out = export_html(segments, base_path)
+    elif format == "json":
+        out = export_json(segments, base_path)
     elif format == "pdf":
         out = export_pdf(segments, base_path, max_chars_per_page, pdf_template, job_filename, job_duration, font_size, row_padding)
     else:

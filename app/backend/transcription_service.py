@@ -118,6 +118,14 @@ class TranscriptionService:
         self._qwen3_model = None
         self._current_qwen3_model_name = None
 
+    def _normalize_model_name_for_engine(self, model_name: Optional[str]) -> Optional[str]:
+        """Map whisper.cpp-only quantized names back to faster-whisper model ids when needed."""
+        if not model_name or self.engine == "whisper.cpp":
+            return model_name
+        if isinstance(model_name, str) and model_name.endswith("-q5_0"):
+            return model_name[:-5]
+        return model_name
+
     # ── Whisper model ────────────────────────────────────────
 
     def _load_whisper(self, requested_model_name: Optional[str] = None):
@@ -636,18 +644,19 @@ class TranscriptionService:
 
             check_pause_cancel(job_id)
             # ── Step 2.5: Load / Downloader Whisper or Qwen model ────────
-            from app.backend.hardware_detector import select_best_engine
+            from hardware_detector import select_best_engine
             best_cfg = select_best_engine(self.hw)
             
             # Start with specified model name or fallback to hardware default
             base_model = model_name if model_name and model_name != "auto" else best_cfg["model"]
+            base_model = self._normalize_model_name_for_engine(base_model)
             
             # Apply performance profile settings
             if performance_mode == "eco":
                 active_model = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
                 beam_size = 1
             elif performance_mode == "balanced":
-                is_best_whisper_cpp = best_cfg["asr_engine"] == "whisper.cpp"
+                is_best_whisper_cpp = self.engine == "whisper.cpp"
                 active_model = "medium-q5_0" if is_best_whisper_cpp else "medium"
                 if "qwen" in base_model.lower():
                     active_model = "qwen3-asr-0.6b"
@@ -663,8 +672,9 @@ class TranscriptionService:
                     is_large = "large" in active_model.lower() or "1.7b" in active_model.lower()
                     beam_size = 3 if is_large else 1
 
+            active_model = self._normalize_model_name_for_engine(active_model)
             is_qwen3 = active_model and "qwen3" in active_model.lower()
-            is_whisper_cpp = "q5_0" in active_model or best_cfg["asr_engine"] == "whisper.cpp"
+            is_whisper_cpp = self.engine == "whisper.cpp" and not is_qwen3
 
             if is_qwen3:
                 _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
@@ -921,7 +931,7 @@ class TranscriptionService:
             for seg in segments:
                 check_pause_cancel(job_id)
                 words_list = []
-                if need_word_ts and seg.words:
+                if seg.words:
                     for w in seg.words:
                         words_list.append({
                             "start": round(w.start + offset, 3),

@@ -1,6 +1,6 @@
 {
   "name": "onroku-ai",
-  "version": "5.5.0",
+  "version": "6.0.0",
   "description": "Onroku AI — Offline multi-speaker Japanese transcription",
   "main": "app/frontend/main.js",
   "homepage": "./",

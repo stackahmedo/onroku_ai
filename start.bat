@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 echo ============================================
-echo  Onroku AI V5.5 -- Launcher
+echo  Onroku AI V6.0 -- Launcher
 echo ============================================
 
 REM Check Python

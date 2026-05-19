@@ -13,9 +13,9 @@ pandas
 python-multipart
 pydantic
 requests
+reportlab
 sse-starlette
 sherpa-onnx
 soundfile
 qwen-asr
-
 

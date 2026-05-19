@@ -13,6 +13,7 @@ Routes:
 """
 
 import asyncio
+import base64
 import json
 import logging
 import os
@@ -25,6 +26,7 @@ from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, Upload
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from sse_starlette.sse import EventSourceResponse
+from starlette.background import BackgroundTask
 
 from database_service import DatabaseService
 from export_service import export_transcript
@@ -254,14 +256,17 @@ async def upload_audio(
         except Exception:
             file_size_bytes = 0
 
-        from app.backend.hardware_detector import select_best_engine
+        from hardware_detector import select_best_engine
         best_cfg = select_best_engine(HARDWARE)
+        runtime_prefers_whisper_cpp = transcription_service.engine == "whisper.cpp"
         base_model = model if model and model != "auto" else best_cfg["model"]
+        if not runtime_prefers_whisper_cpp and isinstance(base_model, str) and base_model.endswith("-q5_0"):
+            base_model = base_model[:-5]
         
         if performance_mode == "eco":
             actual_model_name = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
         elif performance_mode == "balanced":
-            is_best_whisper_cpp = best_cfg["asr_engine"] == "whisper.cpp"
+            is_best_whisper_cpp = runtime_prefers_whisper_cpp
             actual_model_name = "medium-q5_0" if is_best_whisper_cpp else "medium"
             if "qwen" in base_model.lower():
                 actual_model_name = "qwen3-asr-0.6b"
@@ -358,7 +363,7 @@ def _run_transcription(
             logger.warning(f"Failed to update auto-detected language in DB: {e}")
 
     with transcription_lock:
-        from app.backend.transcription_service import is_cancelled
+        from transcription_service import is_cancelled
         if is_cancelled(job_id):
             db_service.update_job_status(job_id, "cancelled")
             _progress_cb(0, "キャンセル済み / Cancelled")
@@ -579,8 +584,8 @@ async def resume(job_id: str):
 
 @app.post("/export/{job_id}")
 async def export(job_id: str, format: str = Query(default="doc")):
-    if format not in ("txt", "doc", "pdf"):
-        raise HTTPException(status_code=400, detail="format must be txt, doc, or pdf")
+    if format not in ("txt", "doc", "pdf", "csv", "xlsx", "html", "json"):
+        raise HTTPException(status_code=400, detail="format must be txt, doc, pdf, csv, xlsx, html, or json")
 
     job = db_service.get_job(job_id)
     if not job or not job.get("transcript_file"):
@@ -590,8 +595,20 @@ async def export(job_id: str, format: str = Query(default="doc")):
         "txt":   "text/plain; charset=utf-8",
         "doc":   "application/msword",
         "pdf":   "application/pdf",
+        "csv":   "text/csv; charset=utf-8",
+        "xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "html":  "text/html; charset=utf-8",
+        "json":  "application/json",
     }
-    ext_map = {"txt": "txt", "doc": "doc", "pdf": "pdf"}
+    ext_map = {
+        "txt": "txt",
+        "doc": "doc",
+        "pdf": "pdf",
+        "csv": "csv",
+        "xlsx": "xlsx",
+        "html": "html",
+        "json": "json",
+    }
 
     try:
         settings = load_settings()
@@ -743,12 +760,29 @@ from fastapi.responses import FileResponse
 @app.post("/convert-txt-to-pdf")
 async def convert_txt_to_pdf(payload: dict):
     text = payload.get("text", "").strip()
+    output_format = str(payload.get("output_format", "pdf")).strip().lower()
+    if output_format == "docx":
+        output_format = "doc"
     pdf_template = payload.get("pdf_template", "compact_terminal")
     max_chars = int(payload.get("max_chars", 1000))
     custom_filename = payload.get("custom_filename")
     custom_duration = payload.get("custom_duration")
     font_size = payload.get("font_size")
     row_padding = payload.get("row_padding")
+    custom_header = payload.get("custom_header")
+    custom_footer = payload.get("custom_footer")
+    watermark = payload.get("watermark")
+    vertical_japanese = bool(payload.get("vertical_japanese", False))
+    page_layout = payload.get("page_layout", "table")
+    auto_page_numbers = bool(payload.get("auto_page_numbers", True))
+    smart_speaker_styling = bool(payload.get("smart_speaker_styling", True))
+    speaker_renames = payload.get("speaker_renames") or {}
+    speaker_colors = payload.get("speaker_colors") or {}
+    speaker_filter = payload.get("speaker_filter") or []
+    silence_detection = bool(payload.get("silence_detection", False))
+    silence_threshold = float(payload.get("silence_threshold", 4) or 4)
+    custom_font_name = payload.get("custom_font_name")
+    custom_font_base64 = payload.get("custom_font_base64")
 
     if font_size is not None:
         try:
@@ -765,7 +799,7 @@ async def convert_txt_to_pdf(payload: dict):
         raise HTTPException(status_code=400, detail="Text content cannot be empty")
 
     import re
-    from export_service import export_pdf
+    from export_service import export_csv, export_doc, export_excel, export_html, export_json, export_pdf, export_txt
 
     segments = []
     lines = text.splitlines()
@@ -850,6 +884,32 @@ async def convert_txt_to_pdf(payload: dict):
                 "text": line_clean
             })
 
+    if speaker_renames:
+        for seg in segments:
+            speaker = seg.get("speaker", "")
+            if speaker in speaker_renames and speaker_renames[speaker]:
+                seg["speaker"] = speaker_renames[speaker]
+
+    if speaker_filter:
+        allowed = {str(item).strip() for item in speaker_filter if str(item).strip()}
+        segments = [seg for seg in segments if seg.get("speaker") in allowed]
+
+    if silence_detection and len(segments) > 1:
+        enhanced_segments = []
+        previous_end = segments[0].get("start", 0.0)
+        for seg in segments:
+            gap = float(seg.get("start", 0.0)) - float(previous_end or 0.0)
+            if gap >= silence_threshold:
+                enhanced_segments.append({
+                    "start": previous_end,
+                    "end": seg.get("start", previous_end),
+                    "speaker": "Silence",
+                    "text": f"[Silence {gap:.1f}s]"
+                })
+            enhanced_segments.append(seg)
+            previous_end = seg.get("end", seg.get("start", previous_end))
+        segments = enhanced_segments
+
     if not segments:
         raise HTTPException(status_code=400, detail="Could not parse any valid lines from the text content")
 
@@ -857,25 +917,66 @@ async def convert_txt_to_pdf(payload: dict):
     import tempfile
     temp_dir = Path(tempfile.mkdtemp(prefix="tscr_conv_"))
     try:
-        out_pdf_path = temp_dir / "converted_transcript.pdf"
-        export_pdf(
-            segments=segments,
-            export_path=out_pdf_path,
-            max_chars_per_page=max_chars,
-            pdf_template=pdf_template,
-            job_filename=custom_filename,
-            job_duration=custom_duration,
-            font_size=font_size,
-            row_padding=row_padding
-        )
-        if not out_pdf_path.exists():
-            raise HTTPException(status_code=500, detail="PDF generation failed")
+        custom_font_path = None
+        if custom_font_base64:
+            try:
+                font_suffix = Path(custom_font_name or "custom_font.ttf").suffix or ".ttf"
+                custom_font_path = temp_dir / f"custom_font{font_suffix}"
+                custom_font_path.write_bytes(base64.b64decode(custom_font_base64))
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid custom font upload: {exc}")
+
+        safe_stem = re.sub(r"[^A-Za-z0-9_.-]+", "_", custom_filename or f"transcript_{datetime.now().strftime('%Y%m%d_%H%M%S')}").strip("._") or "transcript"
+        base_path = temp_dir / safe_stem
+        if output_format == "pdf":
+            out_path = export_pdf(
+                segments=segments,
+                export_path=base_path,
+                max_chars_per_page=max_chars,
+                pdf_template=pdf_template,
+                job_filename=custom_filename,
+                job_duration=custom_duration,
+                font_size=font_size,
+                row_padding=row_padding,
+                speaker_colors=speaker_colors,
+                custom_header=custom_header,
+                custom_footer=custom_footer,
+                watermark=watermark,
+                vertical_japanese=vertical_japanese,
+                page_layout=page_layout,
+                auto_page_numbers=auto_page_numbers,
+                smart_speaker_styling=smart_speaker_styling,
+                custom_font_path=str(custom_font_path) if custom_font_path else None
+            )
+            media_type = "application/pdf"
+        elif output_format == "doc":
+            out_path = export_doc(segments, base_path.with_suffix(".doc"))
+            media_type = "application/msword"
+        elif output_format == "xlsx":
+            out_path = export_excel(segments, base_path)
+            media_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        elif output_format == "csv":
+            out_path = export_csv(segments, base_path)
+            media_type = "text/csv; charset=utf-8"
+        elif output_format == "html":
+            out_path = export_html(segments, base_path)
+            media_type = "text/html; charset=utf-8"
+        elif output_format == "json":
+            out_path = export_json(segments, base_path)
+            media_type = "application/json"
+        else:
+            out_path = export_txt(segments, base_path)
+            media_type = "text/plain; charset=utf-8"
+
+        if not out_path.exists():
+            raise HTTPException(status_code=500, detail="Export generation failed")
             
         # Return the generated PDF file, and schedule directory cleanup after request
         return FileResponse(
-            path=str(out_pdf_path),
-            media_type="application/pdf",
-            filename="converted_transcript.pdf"
+            path=str(out_path),
+            media_type=media_type,
+            filename=out_path.name,
+            background=BackgroundTask(shutil.rmtree, temp_dir, True)
         )
     except Exception as e:
         logger.error(f"Error in convert_txt_to_pdf: {e}")
@@ -904,7 +1005,7 @@ async def list_exported_files():
             return {"export_dir": str(target_dir.resolve()), "files": []}
             
         files_info = []
-        supported_exts = {".txt", ".doc", ".pdf"}
+        supported_exts = {".txt", ".doc", ".pdf", ".csv", ".xlsx", ".html", ".json"}
         
         for p in target_dir.iterdir():
             if p.is_file() and p.suffix.lower() in supported_exts:
@@ -944,6 +1045,10 @@ async def download_exported_file(filename: str):
             ".txt":   "text/plain; charset=utf-8",
             ".doc":   "application/msword",
             ".pdf":   "application/pdf",
+            ".csv":   "text/csv; charset=utf-8",
+            ".xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".html":  "text/html; charset=utf-8",
+            ".json":  "application/json",
         }
         media_type = mime_map.get(file_path.suffix.lower(), "application/octet-stream")
         

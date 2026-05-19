@@ -111,6 +111,18 @@ ipcMain.handle('win:restart', () => {
   app.relaunch();
   app.exit(0);
 });
+ipcMain.handle('win:confirm', async (event, options) => {
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: 'question',
+    buttons: options.buttons || ['OK', 'Cancel'],
+    defaultId: 0,
+    cancelId: 1,
+    title: options.title || 'Onroku AI',
+    message: options.message,
+    detail: options.detail || '',
+  });
+  return result.response === 0;
+});
 
 // ── IPC: API ───────────────────────────────────────────────
 
@@ -309,8 +321,8 @@ function buildMenu() {
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
             title: 'Onroku AI',
-            message: 'Onroku AI V5.5',
-            detail: 'Offline Multi-Speaker Transcription V5.5\nPowered by faster-whisper & Pyannote',
+            message: 'Onroku AI V6.0',
+            detail: 'Offline Multi-Speaker Transcription V6.0\nPowered by faster-whisper & Pyannote',
           }),
         },
         {

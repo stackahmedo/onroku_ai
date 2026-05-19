@@ -54,6 +54,21 @@ export default function App() {
   const [txtDuration, setTxtDuration] = useState('');
   const [txtFontSize, setTxtFontSize] = useState('');
   const [txtRowPadding, setTxtRowPadding] = useState('');
+  const [txtOutputFormat, setTxtOutputFormat] = useState('pdf');
+  const [txtHeader, setTxtHeader] = useState('');
+  const [txtFooter, setTxtFooter] = useState('');
+  const [txtWatermark, setTxtWatermark] = useState('');
+  const [txtVerticalJapanese, setTxtVerticalJapanese] = useState(false);
+  const [txtPageLayout, setTxtPageLayout] = useState('table');
+  const [txtAutoPageNumbers, setTxtAutoPageNumbers] = useState(true);
+  const [txtSmartSpeakerStyling, setTxtSmartSpeakerStyling] = useState(true);
+  const [txtSpeakerFilter, setTxtSpeakerFilter] = useState('');
+  const [txtSpeakerRenames, setTxtSpeakerRenames] = useState('');
+  const [txtSpeakerColors, setTxtSpeakerColors] = useState('');
+  const [txtCustomFontName, setTxtCustomFontName] = useState('');
+  const [txtCustomFontFile, setTxtCustomFontFile] = useState(null);
+  const [txtSilenceDetection, setTxtSilenceDetection] = useState(false);
+  const [txtSilenceThreshold, setTxtSilenceThreshold] = useState(4);
   const [isConvertingTxt, setIsConvertingTxt] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
 
@@ -65,6 +80,12 @@ export default function App() {
       }
     };
   }, [pdfPreviewUrl]);
+  useEffect(() => {
+    if (txtOutputFormat !== 'pdf' && pdfPreviewUrl) {
+      window.URL.revokeObjectURL(pdfPreviewUrl);
+      setPdfPreviewUrl(null);
+    }
+  }, [txtOutputFormat, pdfPreviewUrl]);
   const [isSearchingAPI, setIsSearchingAPI] = useState(false);
   const [testResult, setTestResult] = useState(null);
   const [isClearingCache, setIsClearingCache] = useState(false);
@@ -218,7 +239,7 @@ export default function App() {
     showToast(uiLang === 'ja' ? 'バックエンドサーバーを自動検索中...' : 'Searching for backend servers...', 'info');
 
     const currentHost = window.location.hostname || 'localhost';
-    const protocol = window.location.protocol || 'http:';
+    const protocol = window.location.protocol === 'file:' ? 'http:' : (window.location.protocol || 'http:');
     
     const candidates = [
       `${protocol}//${currentHost}:8000`,
@@ -390,7 +411,17 @@ export default function App() {
   }, [activeTab, loadExportedFiles]);
 
   const handleDeleteExportFile = async (fileName) => {
-    if (!window.confirm(t.exportsConfirmDelete || 'Are you sure?')) return;
+    let proceed = false;
+    if (window.electron && window.electron.win && window.electron.win.confirm) {
+      proceed = await window.electron.win.confirm({
+        title: uiLang === 'ja' ? 'ファイルを削除' : 'Delete File',
+        message: t.exportsConfirmDelete || (uiLang === 'ja' ? 'このファイルを削除してもよろしいですか？' : 'Are you sure you want to delete this file?'),
+        buttons: uiLang === 'ja' ? ['削除', 'キャンセル'] : ['Delete', 'Cancel']
+      });
+    } else {
+      proceed = window.confirm(t.exportsConfirmDelete || 'Are you sure?');
+    }
+    if (!proceed) return;
     try {
       const res = await fetch(`${API}/exports/${encodeURIComponent(fileName)}`, {
         method: 'DELETE',
@@ -469,8 +500,23 @@ export default function App() {
   };
 
   const renderPdfCustomizerForm = () => {
+    const pdfMakerFieldStyle = { width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' };
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+            Output format
+          </label>
+          <select value={txtOutputFormat} onChange={(e) => setTxtOutputFormat(e.target.value)} style={pdfMakerFieldStyle}>
+            <option value="pdf">PDF</option>
+            <option value="doc">DOC</option>
+            <option value="xlsx">XLSX</option>
+            <option value="csv">CSV</option>
+            <option value="html">HTML</option>
+            <option value="json">JSON</option>
+            <option value="txt">TXT</option>
+          </select>
+        </div>
         
         {/* Template Select */}
         <div>
@@ -559,8 +605,103 @@ export default function App() {
             />
           </div>
         </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+          <div>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Header</label>
+            <input type="text" value={txtHeader} onChange={(e) => setTxtHeader(e.target.value)} placeholder="Project / meeting title" style={pdfMakerFieldStyle} />
+          </div>
+          <div>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Footer</label>
+            <input type="text" value={txtFooter} onChange={(e) => setTxtFooter(e.target.value)} placeholder="Confidential / notes" style={pdfMakerFieldStyle} />
+          </div>
+          <div>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Watermark</label>
+            <input type="text" value={txtWatermark} onChange={(e) => setTxtWatermark(e.target.value)} placeholder="DRAFT" style={pdfMakerFieldStyle} />
+          </div>
+          <div>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Page Layout</label>
+            <select value={txtPageLayout} onChange={(e) => setTxtPageLayout(e.target.value)} style={pdfMakerFieldStyle}>
+              <option value="table">Standard table</option>
+              <option value="wide">Wide transcript</option>
+              <option value="compact">Compact pages</option>
+            </select>
+          </div>
+        </div>
+
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Speaker rename, color, and filter</label>
+          <textarea value={txtSpeakerRenames} onChange={(e) => setTxtSpeakerRenames(e.target.value)} placeholder={'Speaker 1=Host\nSpeaker 2=Guest'} style={{ ...pdfMakerFieldStyle, height: '52px', resize: 'vertical', fontFamily: 'Consolas, Monaco, monospace' }} />
+          <textarea value={txtSpeakerColors} onChange={(e) => setTxtSpeakerColors(e.target.value)} placeholder={'Host=#2563eb\nGuest=#16a34a'} style={{ ...pdfMakerFieldStyle, height: '52px', resize: 'vertical', fontFamily: 'Consolas, Monaco, monospace', marginTop: '8px' }} />
+          <input type="text" value={txtSpeakerFilter} onChange={(e) => setTxtSpeakerFilter(e.target.value)} placeholder="Speaker filter: Host, Guest" style={{ ...pdfMakerFieldStyle, marginTop: '8px' }} />
+        </div>
+
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Custom Font Upload</label>
+          <input
+            type="file"
+            accept=".ttf,.ttc,.otf"
+            onChange={(e) => {
+              const file = e.target.files?.[0] || null;
+              setTxtCustomFontFile(file);
+              setTxtCustomFontName(file?.name || '');
+            }}
+            style={pdfMakerFieldStyle}
+          />
+          {txtCustomFontName && <span style={{ fontSize: '11px', color: 'var(--clr-text-muted)' }}>Selected: {txtCustomFontName}</span>}
+        </div>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '12px', color: 'var(--clr-text)' }}>
+          <label><input type="checkbox" checked={txtSmartSpeakerStyling} onChange={(e) => setTxtSmartSpeakerStyling(e.target.checked)} /> Smart speaker styling</label>
+          <label><input type="checkbox" checked={txtAutoPageNumbers} onChange={(e) => setTxtAutoPageNumbers(e.target.checked)} /> Auto page numbering</label>
+          <label><input type="checkbox" checked={txtVerticalJapanese} onChange={(e) => setTxtVerticalJapanese(e.target.checked)} /> Vertical Japanese PDF</label>
+          <label><input type="checkbox" checked={txtSilenceDetection} onChange={(e) => setTxtSilenceDetection(e.target.checked)} /> Silence detection</label>
+        </div>
+        {txtSilenceDetection && (
+          <div>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>Silence Threshold Seconds</label>
+            <input type="number" min="1" max="60" step="0.5" value={txtSilenceThreshold} onChange={(e) => setTxtSilenceThreshold(e.target.value)} style={pdfMakerFieldStyle} />
+          </div>
+        )}
       </div>
     );
+  };
+
+  const parsePdfMakerMap = (value) => {
+    return value
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .reduce((acc, line) => {
+        const [key, ...rest] = line.split('=');
+        if (key && rest.length) acc[key.trim()] = rest.join('=').trim();
+        return acc;
+      }, {});
+  };
+
+  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = typeof reader.result === 'string' ? reader.result : '';
+      const marker = 'base64,';
+      const index = result.indexOf(marker);
+      resolve(index >= 0 ? result.slice(index + marker.length) : result);
+    };
+    reader.onerror = () => reject(reader.error || new Error('Failed to read file'));
+    reader.readAsDataURL(file);
+  });
+
+  const getDownloadFilename = (res, fallbackExtension) => {
+    const disposition = res.headers.get('content-disposition') || '';
+    const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+    if (utf8Match) {
+      return decodeURIComponent(utf8Match[1]);
+    }
+    const plainMatch = disposition.match(/filename="?([^";]+)"?/i);
+    if (plainMatch) {
+      return plainMatch[1];
+    }
+    return `converted_transcript.${fallbackExtension}`;
   };
 
   const handleConvertTxtToPdf = async (shouldDownload = false) => {
@@ -574,39 +715,73 @@ export default function App() {
     showToast(uiLang === 'ja' ? 'PDFを生成中...' : 'Generating PDF...', 'info');
     
     try {
+      const customFontBase64 = txtCustomFontFile ? await readFileAsBase64(txtCustomFontFile) : undefined;
       const res = await fetch(`${API}/convert-txt-to-pdf`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: trimmed,
+          output_format: txtOutputFormat,
           pdf_template: txtPdfTemplate,
           max_chars: txtMaxChars,
           custom_filename: txtFilename || undefined,
           custom_duration: txtDuration || undefined,
           font_size: txtFontSize ? parseFloat(txtFontSize) : undefined,
           row_padding: txtRowPadding ? parseFloat(txtRowPadding) : undefined,
+          custom_header: txtHeader || undefined,
+          custom_footer: txtFooter || undefined,
+          watermark: txtWatermark || undefined,
+          vertical_japanese: txtVerticalJapanese,
+          page_layout: txtPageLayout,
+          auto_page_numbers: txtAutoPageNumbers,
+          smart_speaker_styling: txtSmartSpeakerStyling,
+          speaker_filter: txtSpeakerFilter.split(',').map((item) => item.trim()).filter(Boolean),
+          speaker_renames: parsePdfMakerMap(txtSpeakerRenames),
+          speaker_colors: parsePdfMakerMap(txtSpeakerColors),
+          silence_detection: txtSilenceDetection,
+          silence_threshold: parseFloat(txtSilenceThreshold) || 4,
+          custom_font_name: txtCustomFontFile ? txtCustomFontFile.name : undefined,
+          custom_font_base64: customFontBase64,
         }),
       });
       
       if (res.ok) {
         const blob = await res.blob();
         const url = window.URL.createObjectURL(blob);
+        const isPdfOutput = txtOutputFormat === 'pdf';
+        const downloadName = getDownloadFilename(res, txtOutputFormat);
         
         // Revoke old preview URL if exists
         if (pdfPreviewUrl) {
           window.URL.revokeObjectURL(pdfPreviewUrl);
         }
         
-        setPdfPreviewUrl(url);
+        if (isPdfOutput) {
+          setPdfPreviewUrl(url);
+        } else {
+          setPdfPreviewUrl(null);
+        }
         showToast(uiLang === 'ja' ? 'PDFプレビューを更新しました！' : 'PDF preview updated successfully!', 'success');
         
         if (shouldDownload) {
           const a = document.createElement('a');
           a.href = url;
-          a.download = 'converted_transcript.pdf';
+          a.download = downloadName;
           document.body.appendChild(a);
           a.click();
           a.remove();
+        }
+        if (!isPdfOutput) {
+          if (!shouldDownload) {
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = downloadName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+          }
+          setTimeout(() => window.URL.revokeObjectURL(url), 0);
+          showToast(uiLang === 'ja' ? 'ファイルを書き出しました。' : 'File exported successfully.', 'success');
         }
       } else {
         const err = await res.json();
@@ -636,19 +811,17 @@ export default function App() {
       setUploadNotice(`${noticePrefix}${uiLang === 'ja' ? 'アップロード中: ' : 'Uploading: '}${file.name}`);
 
       try {
-        let response;
-
         if (window.electron && (file._isPath || file.path)) {
           // Electron path (both browsed and dropped files support IPC upload)
           setUploadProgress(50);
-          response = await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange);
+          await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange);
           setUploadProgress(100);
         } else {
           // Browser / React dev fallback
           const formData = new FormData();
           formData.append('file', file);
 
-          response = await new Promise((resolve, reject) => {
+          await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
             const speakerParam = speakerCount && speakerCount !== 'auto' ? `&speaker_count=${speakerCount}` : '';
             const chunkParam = chunkSeconds && chunkSeconds !== 'auto' ? `&chunk_seconds=${chunkSeconds}` : '';

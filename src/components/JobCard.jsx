@@ -7,7 +7,7 @@ const getApiUrl = () => {
     return saved.trim();
   }
   const hostname = window.location.hostname || '127.0.0.1';
-  const protocol = window.location.protocol || 'http:';
+  const protocol = window.location.protocol === 'file:' ? 'http:' : (window.location.protocol || 'http:');
   return `${protocol}//${hostname}:8000`;
 };
 const API = getApiUrl();
@@ -131,10 +131,21 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         if (savePath) {
           await window.electron.file.write(savePath, buffer);
           const uiLang = localStorage.getItem('ui_lang') || 'ja';
-          const msg = uiLang === 'ja'
-            ? `ファイルを正常にエクスポートしました。\n保存先: ${savePath}\n\n保存したファイルを開きますか？`
-            : `Transcript exported successfully.\nSaved to: ${savePath}\n\nWould you like to open the saved file?`;
-          if (window.confirm(msg)) {
+          let shouldOpen = false;
+          if (window.electron && window.electron.win && window.electron.win.confirm) {
+            shouldOpen = await window.electron.win.confirm({
+              title: uiLang === 'ja' ? 'エクスポート完了' : 'Export Complete',
+              message: uiLang === 'ja' ? 'ファイルを正常にエクスポートしました。' : 'Transcript exported successfully.',
+              detail: uiLang === 'ja' ? `保存先: ${savePath}\n\n保存したファイルを開きますか？` : `Saved to: ${savePath}\n\nWould you like to open the saved file?`,
+              buttons: uiLang === 'ja' ? ['開く', 'キャンセル'] : ['Open', 'Cancel']
+            });
+          } else {
+            const msg = uiLang === 'ja'
+              ? `ファイルを正常にエクスポートしました。\n保存先: ${savePath}\n\n保存したファイルを開きますか？`
+              : `Transcript exported successfully.\nSaved to: ${savePath}\n\nWould you like to open the saved file?`;
+            shouldOpen = window.confirm(msg);
+          }
+          if (shouldOpen) {
             await window.electron.shell.open(savePath);
           }
         }
@@ -414,6 +425,18 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
               disabled={exporting}
               style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.15)' }}
             >📝 {t.exportDoc || 'DOC'}</button>
+            <button
+              id={`export-csv-${job.id.substring(0,8)}`}
+              className="btn btn-export btn-csv"
+              onClick={() => handleExport('csv')}
+              disabled={exporting}
+            >CSV</button>
+            <button
+              id={`export-xlsx-${job.id.substring(0,8)}`}
+              className="btn btn-export btn-xlsx"
+              onClick={() => handleExport('xlsx')}
+              disabled={exporting}
+            >XLSX</button>
             <button
               id={`export-pdf-${job.id.substring(0,8)}`}
               className="btn btn-export btn-pdf"

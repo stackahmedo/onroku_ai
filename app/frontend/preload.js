@@ -34,5 +34,6 @@ contextBridge.exposeInMainWorld('electron', {
     close:    () => ipcRenderer.invoke('win:close'),
     reload:   () => ipcRenderer.invoke('win:reload'),
     restart:  () => ipcRenderer.invoke('win:restart'),
+    confirm:  (options) => ipcRenderer.invoke('win:confirm', options),
   },
 });

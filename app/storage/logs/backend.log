@@ -1,40 +1,39 @@
-2026-05-19 09:44:02,153 [INFO] hardware_detector: Hardware detected: tier=heavy, device=vulkan, model=large-v3, RAM=31.4GB, GPU=AMD Radeon(TM) Graphics
-2026-05-19 09:44:02,153 [INFO] main: Hardware profile: {'tier': 'heavy', 'device': 'vulkan', 'engine': 'whisper.cpp', 'gpu_type': 'amd_intel', 'model_name': 'large-v3', 'compute_type': 'float16', 'chunk_seconds': 300, 'threads': 8, 'cpu_cores': 8, 'cpu_name': 'AMD Ryzen 7 5700U with Radeon Graphics', 'ram_gb': 31.4, 'gpu_available': True, 'gpu_name': 'AMD Radeon(TM) Graphics', 'gpu_vram_gb': None}
-2026-05-19 09:44:02,153 [WARNING] transcription_service: Hybrid Engine: Recommended engine is whisper.cpp (for AMD/Intel GPU or Apple Silicon), but no binary was found at I:\smart_grid_home\projects\transcript_ai_v2\app\bin\whisper-cli.exe.
-2026-05-19 09:44:02,153 [WARNING] transcription_service: To enable AMD Radeon GPU (Vulkan) or macOS (Metal) acceleration:
-2026-05-19 09:44:02,154 [WARNING] transcription_service:   1. Download a precompiled 'whisper-cli' executable for your system.
-2026-05-19 09:44:02,154 [WARNING] transcription_service:   2. Place it exactly at: I:\smart_grid_home\projects\transcript_ai_v2\app\bin\whisper-cli.exe
-2026-05-19 09:44:02,154 [WARNING] transcription_service: Gracefully falling back to CPU execution (faster-whisper INT8)...
-2026-05-19 09:44:02,231 [INFO] database_service: Database initialised
-2026-05-19 09:44:02,231 [INFO] main: Onroku AI started
-2026-05-19 09:58:19,112 [INFO] database_service: Job created: f8a12c48-2f19-4639-bbe1-4fce80ca5f2e
-2026-05-19 09:58:19,113 [INFO] main: Uploaded: test file 55.mp3 → job f8a12c48-2f19-4639-bbe1-4fce80ca5f2e with model large-v3 (Size: 8466077 bytes)
-2026-05-19 09:58:19,818 [INFO] transcription_service: Preprocessed: 585.4s
-2026-05-19 09:58:19,933 [INFO] transcription_service: Split into 2 chunk(s) of 300s
-2026-05-19 09:58:19,943 [INFO] transcription_service: Loading faster-whisper model: large-v3 on cpu (int8)
-2026-05-19 09:58:21,023 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/Systran/faster-whisper-large-v3/revision/main "HTTP/1.1 200 OK"
-2026-05-19 09:58:27,795 [INFO] transcription_service: Whisper model loaded
-2026-05-19 09:58:27,966 [INFO] faster_whisper: Processing audio with duration 05:00.032
-2026-05-19 09:58:28,742 [INFO] faster_whisper: VAD filter removed 00:45.024 of audio
-2026-05-19 09:58:38,692 [INFO] faster_whisper: Detected language 'ja' with probability 1.00
-2026-05-19 09:58:38,696 [INFO] transcription_service:   Detected language: ja (prob=1.00)
-2026-05-19 09:58:38,705 [INFO] main: Auto-detected language for job f8a12c48-2f19-4639-bbe1-4fce80ca5f2e: ja
-2026-05-19 10:06:56,082 [INFO] transcription_service: Chunk 1/2: 38 segments
-2026-05-19 10:06:56,231 [INFO] faster_whisper: Processing audio with duration 04:45.390
-2026-05-19 10:06:56,852 [INFO] faster_whisper: VAD filter removed 00:56.110 of audio
-2026-05-19 10:07:05,857 [INFO] faster_whisper: Detected language 'ja' with probability 1.00
-2026-05-19 10:07:05,860 [INFO] transcription_service:   Detected language: ja (prob=1.00)
-2026-05-19 10:16:02,185 [INFO] transcription_service: Chunk 2/2: 36 segments
-2026-05-19 10:16:07,058 [INFO] transcription_service: Loaded Hugging Face token from: hf_token.txt
-2026-05-19 10:16:07,058 [INFO] transcription_service: Loading Pyannote speaker diarization pipeline...
-2026-05-19 10:16:07,757 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-3.1/resolve/main/config.yaml "HTTP/1.1 200 OK"
-2026-05-19 10:16:08,841 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/segmentation-3.0/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
-2026-05-19 10:16:09,457 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/xvec_transform.npz "HTTP/1.1 302 Found"
-2026-05-19 10:16:09,671 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/plda.npz "HTTP/1.1 302 Found"
-2026-05-19 10:16:09,945 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
-2026-05-19 10:16:10,058 [INFO] transcription_service: Configured Pyannote embedding_batch_size = 1
-2026-05-19 10:16:10,059 [INFO] transcription_service: Pyannote pipeline loaded
-2026-05-19 10:21:13,400 [INFO] transcription_service: Diarization produced 193 speaker turn(s), 3 unique speaker(s).
-2026-05-19 10:21:13,461 [INFO] transcription_service: Diarization complete. Aligned and split into 76 segments.
-2026-05-19 10:21:13,503 [INFO] main: Transcription done: f8a12c48-2f19-4639-bbe1-4fce80ca5f2e (76 segments)
-2026-05-19 10:51:45,455 [INFO] export_service: TXT exported: C:\TestTranscripts\export_a47206f5-c320-4e12-bed1-efb7278a500c_transcript.txt
+2026-05-19 19:53:40,888 [INFO] hardware_detector: Hardware detected: tier=heavy, device=vulkan, model=large-v3, RAM=31.4GB, GPU=AMD Radeon(TM) Graphics
+2026-05-19 19:53:40,889 [INFO] main: Hardware profile: {'tier': 'heavy', 'device': 'vulkan', 'engine': 'whisper.cpp', 'gpu_type': 'amd_intel', 'model_name': 'large-v3', 'compute_type': 'float16', 'chunk_seconds': 0, 'threads': 8, 'cpu_cores': 8, 'cpu_name': 'AMD Ryzen 7 5700U with Radeon Graphics', 'ram_gb': 31.4, 'gpu_available': True, 'gpu_name': 'AMD Radeon(TM) Graphics', 'gpu_vram_gb': None}
+2026-05-19 19:53:40,889 [WARNING] transcription_service: Hybrid Engine: Recommended engine is whisper.cpp (for AMD/Intel GPU or Apple Silicon), but no binary was found at I:\smart_grid_home\projects\transcript_ai_v2\app\bin\whisper-cli.exe.
+2026-05-19 19:53:40,889 [WARNING] transcription_service: To enable AMD Radeon GPU (Vulkan) or macOS (Metal) acceleration:
+2026-05-19 19:53:40,889 [WARNING] transcription_service:   1. Download a precompiled 'whisper-cli' executable for your system.
+2026-05-19 19:53:40,889 [WARNING] transcription_service:   2. Place it exactly at: I:\smart_grid_home\projects\transcript_ai_v2\app\bin\whisper-cli.exe
+2026-05-19 19:53:40,889 [WARNING] transcription_service: Gracefully falling back to CPU execution (faster-whisper INT8)...
+2026-05-19 19:53:40,964 [INFO] database_service: Database initialised
+2026-05-19 19:53:40,965 [INFO] main: Onroku AI started
+2026-05-19 19:53:53,202 [INFO] database_service: Job created: 45088236-c597-4fd9-bf66-79484dc8e041
+2026-05-19 19:53:53,203 [INFO] main: Uploaded: test file 55.mp3 → job 45088236-c597-4fd9-bf66-79484dc8e041 with model medium (Size: 8466077 bytes)
+2026-05-19 19:54:18,101 [INFO] transcription_service: Preprocessed: 585.4s
+2026-05-19 19:54:18,118 [INFO] transcription_service: No chunking requested or file shorter than chunk size. Transcribing full file.
+2026-05-19 19:54:18,127 [INFO] transcription_service: Loading faster-whisper model: medium on cpu (int8)
+2026-05-19 19:54:19,119 [INFO] httpx: HTTP Request: GET https://huggingface.co/api/models/Systran/faster-whisper-medium/revision/main "HTTP/1.1 200 OK"
+2026-05-19 19:54:21,947 [INFO] transcription_service: Whisper model loaded
+2026-05-19 19:54:21,947 [INFO] transcription_service: Starting chunk transcription with max_workers=1
+2026-05-19 19:54:22,169 [INFO] faster_whisper: Processing audio with duration 09:45.422
+2026-05-19 19:54:23,936 [INFO] faster_whisper: VAD filter removed 01:41.470 of audio
+2026-05-19 19:54:30,438 [INFO] faster_whisper: Detected language 'ja' with probability 1.00
+2026-05-19 19:54:30,443 [INFO] transcription_service:   Detected language: ja (prob=1.00)
+2026-05-19 19:54:30,452 [INFO] main: Auto-detected language for job 45088236-c597-4fd9-bf66-79484dc8e041: ja
+2026-05-19 19:55:06,521 [INFO] export_service: TXT exported: C:\TestTranscripts\export_fd777095-9a47-44ae-a157-f69adfbb9220_transcript.txt
+2026-05-19 19:57:00,792 [INFO] export_service: TXT exported: C:\TestTranscripts\export_fd777095-9a47-44ae-a157-f69adfbb9220_transcript.txt
+2026-05-19 19:57:51,374 [INFO] transcription_service: Chunk 1/1: 69 segments
+2026-05-19 19:57:56,191 [INFO] transcription_service: Loaded Hugging Face token from: hf_token.txt
+2026-05-19 19:57:56,192 [INFO] transcription_service: Loading Pyannote speaker diarization pipeline...
+2026-05-19 19:57:56,704 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-3.1/resolve/main/config.yaml "HTTP/1.1 200 OK"
+2026-05-19 19:57:57,766 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/segmentation-3.0/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
+2026-05-19 19:57:58,296 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/xvec_transform.npz "HTTP/1.1 302 Found"
+2026-05-19 19:57:58,568 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/plda.npz "HTTP/1.1 302 Found"
+2026-05-19 19:57:58,807 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
+2026-05-19 19:57:58,910 [INFO] transcription_service: Configured Pyannote embedding_batch_size = 1
+2026-05-19 19:57:58,910 [INFO] transcription_service: Pyannote pipeline loaded
+2026-05-19 20:02:30,940 [INFO] export_service: TXT exported: C:\TestTranscripts\export_9992657e-f32a-43c6-9e70-074bc0e85461_transcript.txt
+2026-05-19 20:02:39,792 [INFO] export_service: TXT exported: C:\TestTranscripts\export_4b533948-395f-48e0-b363-d0b994b9b963_transcript.txt
+2026-05-19 20:04:01,468 [INFO] transcription_service: Diarization produced 191 speaker turn(s), 3 unique speaker(s).
+2026-05-19 20:04:01,521 [INFO] transcription_service: Diarization complete. Aligned and split into 69 segments.
+2026-05-19 20:04:01,561 [INFO] main: Transcription done: 45088236-c597-4fd9-bf66-79484dc8e041 (69 segments)
