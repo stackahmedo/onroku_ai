@@ -124,7 +124,7 @@ ipcMain.handle('api:hardware', async () => {
   return JSON.parse(r.body.toString());
 });
 
-ipcMain.handle('api:upload', async (event, filePath, language = 'ja', model = 'auto', speakerCount = 'auto', chunkSeconds = 'auto', diarizationMode = 'accurate') => {
+ipcMain.handle('api:upload', async (event, filePath, language = 'ja', model = 'auto', speakerCount = 'auto', chunkSeconds = 'auto', diarizationMode = 'accurate', performanceMode = 'auto', speakerRange = 'normal') => {
   // Build multipart/form-data manually
   const boundary = `----FormBoundary${Date.now()}`;
   const filename  = path.basename(filePath);
@@ -136,7 +136,13 @@ ipcMain.handle('api:upload', async (event, filePath, language = 'ja', model = 'a
   const footer = Buffer.from(`\r\n--${boundary}--\r\n`);
   const body   = Buffer.concat([header, fileData, footer]);
 
-  const queryParams = new URLSearchParams({ language, model, diarization_mode: diarizationMode });
+  const queryParams = new URLSearchParams({
+    language,
+    model,
+    diarization_mode: diarizationMode,
+    performance_mode: performanceMode,
+    speaker_range: speakerRange
+  });
   if (speakerCount && speakerCount !== 'auto') {
     queryParams.append('speaker_count', speakerCount);
   }

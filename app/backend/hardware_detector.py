@@ -191,3 +191,65 @@ def detect_hardware() -> dict:
         f"model={model_name}, RAM={ram_gb}GB, GPU={gpu_name or 'none'}"
     )
     return profile
+
+
+def select_best_engine(hw: dict) -> dict:
+    """
+    Select the optimal engine settings based on detected hardware profile.
+    Returns a config dict containing ASR/speaker engine choices.
+    """
+    gpu_type = hw.get("gpu_type", "none")
+    gpu_vram_gb = hw.get("gpu_vram_gb", 0.0) or 0.0
+    ram_gb = hw.get("ram_gb", 8.0)
+
+    # 1. NVIDIA GPU (CUDA)
+    if gpu_type == "nvidia" and gpu_vram_gb >= 4.0:
+        return {
+            "asr_engine": "faster-whisper",
+            "asr_device": "cuda",
+            "model": "medium" if gpu_vram_gb < 8.0 else "large-v3",
+            "compute_type": "float16",
+            "speaker_engine": "pyannote",
+            "speaker_device": "cuda",
+            "beam_size": 1,
+        }
+
+    # 2. Apple Silicon (Metal/CoreML)
+    elif gpu_type == "apple_silicon":
+        return {
+            "asr_engine": "whisper.cpp",
+            "asr_device": "coreml",
+            "model": "small",
+            "compute_type": "float16",
+            "speaker_engine": "pyannote",
+            "speaker_device": "cpu",
+            "beam_size": 1,
+        }
+
+    # 3. AMD / Intel GPU (Vulkan)
+    elif gpu_type == "amd_intel":
+        # Vulkan supports GGML medium or small models
+        model = "medium-q5_0" if ram_gb >= 16.0 else "small-q5_0"
+        return {
+            "asr_engine": "whisper.cpp",
+            "asr_device": "vulkan",
+            "model": model,
+            "compute_type": "float16",
+            "speaker_engine": "pyannote",
+            "speaker_device": "cpu",
+            "beam_size": 1,
+        }
+
+    # 4. CPU Only / Fallback
+    else:
+        model = "base" if ram_gb >= 16.0 else "small"
+        return {
+            "asr_engine": "faster-whisper",
+            "asr_device": "cpu",
+            "model": model,
+            "compute_type": "int8",
+            "speaker_engine": "pyannote",
+            "speaker_device": "cpu",
+            "beam_size": 1,
+        }
+

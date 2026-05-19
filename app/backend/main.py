@@ -121,6 +121,10 @@ app.add_middleware(
 # ── Progress store (in-memory; job_id → {pct, label}) ──────────────
 _PROGRESS: dict[str, dict] = {}
 
+# Thread lock to guarantee sequential background task execution
+import threading
+transcription_lock = threading.Lock()
+
 
 @app.on_event("startup")
 async def startup():
@@ -148,10 +152,21 @@ async def clear_cache():
         bytes_cleared = 0
         files_cleared = 0
         
+        # Query active jobs to skip their files and temp directories
+        active_jobs = [
+            j for j in db_service.list_jobs(0, 1000)
+            if j.get("status") in ("pending", "transcribing", "paused")
+        ]
+        active_file_paths = {Path(j["file_path"]).resolve() for j in active_jobs if j.get("file_path")}
+        active_job_ids = {j["id"] for j in active_jobs}
+
         # 1. Clear files in UPLOAD_DIR
         if UPLOAD_DIR.exists():
             for f in UPLOAD_DIR.iterdir():
                 if f.is_file():
+                    # Skip active job files
+                    if f.resolve() in active_file_paths:
+                        continue
                     try:
                         bytes_cleared += f.stat().st_size
                         f.unlink()
@@ -176,6 +191,16 @@ async def clear_cache():
         if temp_root.exists():
             for item in temp_root.iterdir():
                 if item.name.startswith("tscr_"):
+                    # Skip active job temp directories
+                    is_active = False
+                    for active_id in active_job_ids:
+                        if active_id in item.name:
+                            is_active = True
+                            break
+                    if is_active:
+                        logger.info(f"Skipping active job temp folder: {item.name}")
+                        continue
+                        
                     try:
                         if item.is_dir():
                             for sub in item.glob("**/*"):
@@ -211,6 +236,8 @@ async def upload_audio(
     speaker_count: int | None = Query(default=None),
     chunk_seconds: int | None = Query(default=None),
     diarization_mode: str = Query(default="accurate"),
+    performance_mode: str = Query(default="auto"),
+    speaker_range: str = Query(default="normal"),
 ):
     try:
         file_id = str(uuid.uuid4())
@@ -227,7 +254,21 @@ async def upload_audio(
         except Exception:
             file_size_bytes = 0
 
-        actual_model_name = HARDWARE["model_name"] if model == "auto" else model
+        from app.backend.hardware_detector import select_best_engine
+        best_cfg = select_best_engine(HARDWARE)
+        base_model = model if model and model != "auto" else best_cfg["model"]
+        
+        if performance_mode == "eco":
+            actual_model_name = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
+        elif performance_mode == "balanced":
+            is_best_whisper_cpp = best_cfg["asr_engine"] == "whisper.cpp"
+            actual_model_name = "medium-q5_0" if is_best_whisper_cpp else "medium"
+            if "qwen" in base_model.lower():
+                actual_model_name = "qwen3-asr-0.6b"
+        elif performance_mode == "accurate":
+            actual_model_name = "large-v3" if "qwen" not in base_model.lower() else "qwen3-asr-1.7b"
+        else: # "auto"
+            actual_model_name = base_model
 
         job_id = db_service.create_job(
             file_id=file_id,
@@ -240,7 +281,18 @@ async def upload_audio(
         )
 
         _PROGRESS[job_id] = {"pct": 0, "label": "待機中... / Waiting..."}
-        background_tasks.add_task(_run_transcription, job_id, str(upload_path), language, actual_model_name, speaker_count, chunk_seconds, diarization_mode)
+        background_tasks.add_task(
+            _run_transcription,
+            job_id,
+            str(upload_path),
+            language,
+            actual_model_name,
+            speaker_count,
+            chunk_seconds,
+            diarization_mode,
+            performance_mode,
+            speaker_range
+        )
 
         logger.info(f"Uploaded: {file.filename} → job {job_id} with model {actual_model_name} (Size: {file_size_bytes} bytes)")
         return {
@@ -258,7 +310,17 @@ async def upload_audio(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _run_transcription(job_id: str, file_path: str, language: str, model_name: str, speaker_count: int | None = None, chunk_seconds: int | None = None, diarization_mode: str = "accurate"):
+def _run_transcription(
+    job_id: str,
+    file_path: str,
+    language: str,
+    model_name: str,
+    speaker_count: int | None = None,
+    chunk_seconds: int | None = None,
+    diarization_mode: str = "accurate",
+    performance_mode: str = "auto",
+    speaker_range: str = "normal"
+):
     """Background task: run full transcription pipeline."""
     import time
     last_db_pct = -1
@@ -295,45 +357,54 @@ def _run_transcription(job_id: str, file_path: str, language: str, model_name: s
         except Exception as e:
             logger.warning(f"Failed to update auto-detected language in DB: {e}")
 
-    try:
-        db_service.update_job_status(job_id, "transcribing")
-        _progress_cb(1, "開始中... / Starting...")
+    with transcription_lock:
+        from app.backend.transcription_service import is_cancelled
+        if is_cancelled(job_id):
+            db_service.update_job_status(job_id, "cancelled")
+            _progress_cb(0, "キャンセル済み / Cancelled")
+            return
 
-        segments = transcription_service.transcribe_file(
-            file_path,
-            job_id,
-            language=language,
-            model_name=model_name,
-            progress_cb=_progress_cb,
-            on_duration_known=_duration_cb,
-            num_speakers=speaker_count,
-            chunk_seconds=chunk_seconds,
-            on_language_detected=_lang_cb,
-            diarization_mode=diarization_mode,
-        )
+        try:
+            db_service.update_job_status(job_id, "transcribing")
+            _progress_cb(1, "開始中... / Starting...")
 
-        # Save JSON transcript
-        file_id = db_service.get_job(job_id)["file_id"]
-        transcript_path = TRANSCRIPT_DIR / f"{file_id}_transcript.json"
-        with open(transcript_path, "w", encoding="utf-8") as f:
-            json.dump(segments, f, ensure_ascii=False, indent=2)
+            segments = transcription_service.transcribe_file(
+                file_path,
+                job_id,
+                language=language,
+                model_name=model_name,
+                progress_cb=_progress_cb,
+                on_duration_known=_duration_cb,
+                num_speakers=speaker_count,
+                chunk_seconds=chunk_seconds,
+                on_language_detected=_lang_cb,
+                diarization_mode=diarization_mode,
+                performance_mode=performance_mode,
+                speaker_range=speaker_range,
+            )
 
-        speakers = len({s["speaker"] for s in segments})
-        db_service.save_transcript(job_id, str(transcript_path), len(segments), speakers)
-        db_service.update_job_status(job_id, "completed")
-        _progress_cb(100, "完了 / Completed")
-        logger.info(f"Transcription done: {job_id} ({len(segments)} segments)")
+            # Save JSON transcript
+            file_id = db_service.get_job(job_id)["file_id"]
+            transcript_path = TRANSCRIPT_DIR / f"{file_id}_transcript.json"
+            with open(transcript_path, "w", encoding="utf-8") as f:
+                json.dump(segments, f, ensure_ascii=False, indent=2)
 
-    except InterruptedError:
-        db_service.update_job_status(job_id, "cancelled")
-        _progress_cb(0, "キャンセル済み / Cancelled")
-    except Exception as e:
-        logger.exception(f"Transcription error for job {job_id}")
-        db_service.update_job_status(job_id, "failed", error_message=str(e))
-        _progress_cb(0, f"エラー / Error: {e}")
-    finally:
-        # Optionally clean up upload file
-        pass
+            speakers = len({s["speaker"] for s in segments})
+            db_service.save_transcript(job_id, str(transcript_path), len(segments), speakers)
+            db_service.update_job_status(job_id, "completed")
+            _progress_cb(100, "完了 / Completed")
+            logger.info(f"Transcription done: {job_id} ({len(segments)} segments)")
+
+        except InterruptedError:
+            db_service.update_job_status(job_id, "cancelled")
+            _progress_cb(0, "キャンセル済み / Cancelled")
+        except Exception as e:
+            logger.exception(f"Transcription error for job {job_id}")
+            db_service.update_job_status(job_id, "failed", error_message=str(e))
+            _progress_cb(0, f"エラー / Error: {e}")
+        finally:
+            # Optionally clean up upload file
+            pass
 
 
 @app.get("/job/{job_id}")
@@ -507,9 +578,9 @@ async def resume(job_id: str):
 
 
 @app.post("/export/{job_id}")
-async def export(job_id: str, format: str = Query(default="excel")):
-    if format not in ("txt", "csv", "excel", "pdf"):
-        raise HTTPException(status_code=400, detail="format must be txt, csv, excel, or pdf")
+async def export(job_id: str, format: str = Query(default="doc")):
+    if format not in ("txt", "doc", "pdf"):
+        raise HTTPException(status_code=400, detail="format must be txt, doc, or pdf")
 
     job = db_service.get_job(job_id)
     if not job or not job.get("transcript_file"):
@@ -517,11 +588,10 @@ async def export(job_id: str, format: str = Query(default="excel")):
 
     mime_map = {
         "txt":   "text/plain; charset=utf-8",
-        "csv":   "text/csv; charset=utf-8",
-        "excel": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "doc":   "application/msword",
         "pdf":   "application/pdf",
     }
-    ext_map = {"txt": "txt", "csv": "csv", "excel": "xlsx", "pdf": "pdf"}
+    ext_map = {"txt": "txt", "doc": "doc", "pdf": "pdf"}
 
     try:
         settings = load_settings()
@@ -807,7 +877,7 @@ async def list_exported_files():
             return {"export_dir": str(target_dir.resolve()), "files": []}
             
         files_info = []
-        supported_exts = {".txt", ".csv", ".xlsx", ".pdf"}
+        supported_exts = {".txt", ".doc", ".pdf"}
         
         for p in target_dir.iterdir():
             if p.is_file() and p.suffix.lower() in supported_exts:
@@ -845,8 +915,7 @@ async def download_exported_file(filename: str):
             
         mime_map = {
             ".txt":   "text/plain; charset=utf-8",
-            ".csv":   "text/csv; charset=utf-8",
-            ".xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".doc":   "application/msword",
             ".pdf":   "application/pdf",
         }
         media_type = mime_map.get(file_path.suffix.lower(), "application/octet-stream")

@@ -35,8 +35,12 @@ export default function App() {
   const [toast, setToast]             = useState(null);
   const [backendOk, setBackendOk]     = useState(null);
 
+  const [performanceMode, setPerformanceMode] = useState('auto');
+  const speakerRange = 'normal';
+  const [hwProfile, setHwProfile] = useState(null);
+
   // New features state
-  const [activeTab, setActiveTab] = useState('history');
+  const [activeTab, setActiveTab] = useState('completed');
   const [settingsExportDir, setSettingsExportDir] = useState('');
   const [pdfMaxChars, setPdfMaxChars] = useState(1000);
   const [pdfTemplate, setPdfTemplate] = useState('corporate');
@@ -107,6 +111,56 @@ export default function App() {
     };
     fetchSettings();
   }, []);
+
+  // ── Fetch Hardware Profile at Startup ────────────────────────
+  useEffect(() => {
+    const fetchHw = async () => {
+      try {
+        let data;
+        if (window.electron) {
+          data = await window.electron.api.getHardware();
+        } else {
+          const res = await fetch(`${API}/hardware`);
+          data = await res.json();
+        }
+        setHwProfile(data);
+      } catch (err) {
+        console.warn('Failed to load hardware profile:', err);
+      }
+    };
+    fetchHw();
+  }, []);
+
+  const getAutoRecommendationText = () => {
+    if (!hwProfile) return uiLang === 'ja' ? 'ハードウェア検出中...' : 'Detecting hardware...';
+    const gpuType = hwProfile.gpu_type || 'none';
+    const gpuVram = hwProfile.gpu_vram_gb || 0;
+    const ram = hwProfile.ram_gb || 8;
+    
+    let asr = 'faster-whisper CPU (int8)';
+    let spk = 'pyannote CPU';
+    let model = ram >= 16 ? 'base' : 'small';
+    
+    if (gpuType === 'nvidia' && gpuVram >= 4) {
+      asr = 'faster-whisper CUDA';
+      spk = 'pyannote CUDA';
+      model = gpuVram < 8 ? 'medium' : 'large-v3';
+    } else if (gpuType === 'apple_silicon') {
+      asr = 'whisper.cpp Metal';
+      spk = 'pyannote CPU';
+      model = 'small';
+    } else if (gpuType === 'amd_intel') {
+      asr = 'whisper.cpp Vulkan';
+      spk = 'pyannote CPU';
+      model = ram >= 16 ? 'medium-q5_0' : 'small-q5_0';
+    }
+    
+    if (uiLang === 'ja') {
+      return `自動推奨: ASR: ${asr} | モデル: ${model} | 話者検出: ${spk}`;
+    } else {
+      return `Recommended: ASR: ${asr} | Model: ${model} | Speaker: ${spk}`;
+    }
+  };
 
   // ── Save Settings ──────────────────────────────────────────
   const handleSaveSettings = async () => {
@@ -484,7 +538,7 @@ export default function App() {
         if (window.electron && (file._isPath || file.path)) {
           // Electron path (both browsed and dropped files support IPC upload)
           setUploadProgress(50);
-          response = await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode);
+          response = await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange);
           setUploadProgress(100);
         } else {
           // Browser / React dev fallback
@@ -495,7 +549,7 @@ export default function App() {
             const xhr = new XMLHttpRequest();
             const speakerParam = speakerCount && speakerCount !== 'auto' ? `&speaker_count=${speakerCount}` : '';
             const chunkParam = chunkSeconds && chunkSeconds !== 'auto' ? `&chunk_seconds=${chunkSeconds}` : '';
-            xhr.open('POST', `${API}/upload?language=${transcribeLang}&model=${transcribeModel}${speakerParam}${chunkParam}&diarization_mode=${diarizationMode}`);
+            xhr.open('POST', `${API}/upload?language=${transcribeLang}&model=${transcribeModel}${speakerParam}${chunkParam}&diarization_mode=${diarizationMode}&performance_mode=${performanceMode}&speaker_range=${speakerRange}`);
 
             xhr.upload.addEventListener('progress', (e) => {
               if (e.lengthComputable) {
@@ -522,6 +576,7 @@ export default function App() {
         setUploadNotice(`${noticePrefix}${uiLang === 'ja' ? 'サーバー処理開始中: ' : 'Starting server process: '}${file.name}`);
         showToast(`✅ Job started: ${file.name}`, 'success');
         await loadJobs();
+        setActiveTab('processing');
       } catch (err) {
         showToast(`❌ ${t.errorUpload} (${file.name}): ${err.message}`, 'error');
       }
@@ -708,6 +763,24 @@ export default function App() {
               </select>
             </div>
 
+            {/* Performance Mode Selector */}
+            <div className="lang-select-row">
+              <label htmlFor="performance-mode-select" className="lang-select-label">
+                ⚡ {t.performanceModeTitle || 'Performance Mode'}
+              </label>
+              <select
+                id="performance-mode-select"
+                className="lang-select"
+                value={performanceMode}
+                onChange={e => setPerformanceMode(e.target.value)}
+              >
+                <option value="auto">⚡ {t.performanceModeAuto || 'Recommended (Auto)'}</option>
+                <option value="eco">🍃 {t.performanceModeEco || 'Eco (Low VRAM/Threads)'}</option>
+                <option value="balanced">⚖️ {t.performanceModeBalanced || 'Balanced (Standard)'}</option>
+                <option value="accurate">🎯 {t.performanceModeAccurate || 'Accurate (Max Precision)'}</option>
+              </select>
+            </div>
+
             {/* Unified 2-Option Speakers Control (Enable / Disable) */}
             <div className="lang-select-row">
               <label htmlFor="diarization-mode-select" className="lang-select-label">
@@ -728,6 +801,8 @@ export default function App() {
               </select>
             </div>
 
+
+
             {/* Chunk seconds selector */}
             <div className="lang-select-row">
               <label htmlFor="chunk-seconds-select" className="lang-select-label">
@@ -746,6 +821,23 @@ export default function App() {
                 <option value="600">10分 / 10 mins</option>
                 <option value="0">{uiLang === 'ja' ? '無制限 / No Chunking (最高精度)' : 'Full File (Max Coherence)'}</option>
               </select>
+            </div>
+
+            {/* Dynamic Auto Recommendation Badge */}
+            <div
+              className="recommendation-badge"
+              style={{
+                margin: '12px 0 6px 0',
+                padding: '10px 14px',
+                borderRadius: '8px',
+                background: 'rgba(255, 255, 255, 0.05)',
+                borderLeft: '3px solid var(--accent, #6366f1)',
+                fontSize: '0.82rem',
+                color: '#cbd5e1',
+                lineHeight: '1.4'
+              }}
+            >
+              {getAutoRecommendationText()}
             </div>
 
             <button
@@ -787,11 +879,31 @@ export default function App() {
           <div className="tabs-nav-wrapper">
             <div className="tabs-nav">
               <button
-                className={`tab-btn ${activeTab === 'history' ? 'tab-btn--active' : ''}`}
-                onClick={() => setActiveTab('history')}
-                id="tab-btn-history"
+                className={`tab-btn ${activeTab === 'processing' ? 'tab-btn--active' : ''}`}
+                onClick={() => setActiveTab('processing')}
+                id="tab-btn-processing"
               >
-                📖 {t.tabHistory}
+                ⚡ {t.tabProcessing || '処理中 / Processing'}
+                {activeJobs.length > 0 && (
+                  <span style={{
+                    background: 'var(--clr-accent, #3b82f6)',
+                    color: '#fff',
+                    borderRadius: '10px',
+                    padding: '2px 6px',
+                    fontSize: '10px',
+                    marginLeft: '6px',
+                    fontWeight: '700'
+                  }}>
+                    {activeJobs.length}
+                  </span>
+                )}
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'completed' ? 'tab-btn--active' : ''}`}
+                onClick={() => setActiveTab('completed')}
+                id="tab-btn-completed"
+              >
+                ✅ {t.tabCompleted || '完了済み / Completed'}
               </button>
               <button
                 className={`tab-btn ${activeTab === 'txt_converter' ? 'tab-btn--active' : ''}`}
@@ -817,29 +929,51 @@ export default function App() {
             </div>
           </div>
 
-          {activeTab === 'history' ? (
+          {activeTab === 'processing' ? (
             <>
-              {jobs.length === 0 && (
+              {activeJobs.length === 0 ? (
                 <div className="empty-state">
-                  <span className="empty-icon">🎤</span>
-                  <p>{t.noJobs}</p>
+                  <span className="empty-icon">⚡</span>
+                  <p>{t.noActiveJobs || '現在、処理中のファイルはありません。'}</p>
                 </div>
+              ) : (
+                activeJobs.map(job => (
+                  <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
+                ))
               )}
-
-              {/* Active */}
-              {activeJobs.map(job => (
-                <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
-              ))}
-
-              {/* Completed */}
-              {completedJobs.map(job => (
-                <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
-              ))}
-
-              {/* Others (failed / cancelled) */}
-              {otherJobs.map(job => (
-                <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
-              ))}
+            </>
+          ) : activeTab === 'completed' ? (
+            <>
+              {completedJobs.length === 0 && otherJobs.length === 0 ? (
+                <div className="empty-state">
+                  <span className="empty-icon">✅</span>
+                  <p>{t.noCompletedJobs || '完了した文字起こし履歴はまだありません。'}</p>
+                </div>
+              ) : (
+                <>
+                  {completedJobs.map(job => (
+                    <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
+                  ))}
+                  {otherJobs.length > 0 && (
+                    <>
+                      <div style={{
+                        textAlign: 'left',
+                        margin: '24px 0 12px 0',
+                        fontSize: '14px',
+                        fontWeight: '600',
+                        color: 'var(--clr-text-muted)',
+                        borderBottom: '1px solid rgba(255, 255, 255, 0.05)',
+                        paddingBottom: '6px'
+                      }}>
+                        {uiLang === 'ja' ? 'その他 (エラー / キャンセル)' : 'Others (Failed / Cancelled)'}
+                      </div>
+                      {otherJobs.map(job => (
+                        <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
+                      ))}
+                    </>
+                  )}
+                </>
+              )}
             </>
           ) : activeTab === 'txt_converter' ? (
             <div className="txt-converter-section glass-panel" style={{ padding: '24px', borderRadius: 'var(--radius-lg)', color: 'var(--clr-text-primary)' }}>
@@ -1155,9 +1289,8 @@ export default function App() {
                       {exportedFiles.map((file, idx) => {
                         // Custom format colors and icons
                         const formatConfig = {
-                          xlsx: { icon: '📗', color: '#22c55e', label: 'Excel' },
+                          doc:  { icon: '📝', color: '#3b82f6', label: 'Word' },
                           pdf:  { icon: '📕', color: '#ef4444', label: 'PDF' },
-                          csv:  { icon: '📊', color: '#3b82f6', label: 'CSV' },
                           txt:  { icon: '📄', color: '#94a3b8', label: 'TXT' }
                         }[file.format] || { icon: '📄', color: 'var(--clr-text-muted)', label: file.format.toUpperCase() };
 

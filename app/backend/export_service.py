@@ -84,6 +84,63 @@ def export_txt(segments: List[Dict], export_path: Path) -> Path:
     return export_path
 
 
+def export_doc(segments: List[Dict], export_path: Path) -> Path:
+    """Export MS Word readable HTML-based .doc transcript"""
+    export_path = Path(export_path).with_suffix(".doc")
+    with open(export_path, "w", encoding="utf-8") as f:
+        f.write(
+            "<html xmlns:o='urn:schemas-microsoft-com:office:office' "
+            "xmlns:w='urn:schemas-microsoft-com:office:word' "
+            "xmlns='http://www.w3.org/TR/REC-html40'>\n"
+            "<head>\n"
+            "<meta charset='utf-8'>\n"
+            "<title>Transcript</title>\n"
+            "<style>\n"
+            "body { font-family: 'MS Gothic', 'Meiryo', 'Arial', sans-serif; font-size: 10.5pt; color: #1e293b; }\n"
+            "h2 { color: #1e3a5f; border-bottom: 2px solid #1e3a5f; padding-bottom: 5px; }\n"
+            "table { border-collapse: collapse; width: 100%; margin-top: 15px; }\n"
+            "th, td { border: 1px solid #cbd5e1; padding: 8px; text-align: left; vertical-align: top; }\n"
+            "th { background-color: #1e3a5f; color: white; font-weight: bold; }\n"
+            "tr:nth-child(even) { background-color: #f8fafc; }\n"
+            ".time-cell { font-weight: bold; color: #0f172a; width: 20%; }\n"
+            ".text-cell { line-height: 1.5; }\n"
+            "</style>\n"
+            "</head>\n"
+            "<body>\n"
+            "<h2>文字起こしデータ書き出し / Transcript Export</h2>\n"
+            "<table>\n"
+            "<thead>\n"
+            "<tr>\n"
+            "<th>時間 / 話者 (Time / Speaker)</th>\n"
+            "<th>文字起こし (Transcript)</th>\n"
+            "</tr>\n"
+            "</thead>\n"
+            "<tbody>\n"
+        )
+        for seg in segments:
+            time_str = _fmt_range(seg.get("start", 0), seg.get("end", 0))
+            speaker = seg.get("speaker", "Unknown")
+            if speaker.startswith("Speaker "):
+                speaker = speaker.replace("Speaker ", "話者")
+            text = seg.get("text", "").strip().replace("\n", "<br/>")
+            
+            f.write(
+                "<tr>\n"
+                f"<td class='time-cell'><b>{time_str}</b><br/>{speaker}</td>\n"
+                f"<td class='text-cell'>{text}</td>\n"
+                "</tr>\n"
+            )
+            
+        f.write(
+            "</tbody>\n"
+            "</table>\n"
+            "</body>\n"
+            "</html>\n"
+        )
+    logger.info(f"DOC exported: {export_path}")
+    return export_path
+
+
 def export_csv(segments: List[Dict], export_path: Path) -> Path:
     """Export CSV with columns: Time, Speaker, Transcript"""
     export_path = Path(export_path).with_suffix(".csv")
@@ -454,8 +511,7 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
 
         # Build table
         table_data = [[
-            Paragraph("<b>時間 / Time</b>", header_cell_style),
-            Paragraph("<b>話者 / Speaker</b>", header_cell_style),
+            Paragraph("<b>時間 / 話者<br/>Time / Speaker</b>", header_cell_style),
             Paragraph("<b>文字起こし / Transcript</b>", header_cell_style)
         ]]
 
@@ -469,18 +525,18 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
                 speaker = speaker.replace("Speaker ", "話者")
             text = seg.get("text", "").strip()
 
+            # Stack time and speaker vertically in the first column
+            time_speaker_val = f"<b>{time_str}</b><br/>{speaker}"
             table_data.append([
-                Paragraph(time_str, body_cell_center),
-                Paragraph(speaker, body_cell_center),
+                Paragraph(time_speaker_val, body_cell_center),
                 Paragraph(text, body_cell_left)
             ])
 
-        # Dynamic Columns adaptation to margin size
+        # Dynamic Columns adaptation to margin size (2 columns: Time/Speaker and Transcript)
         printable_width = 595.27 - (2 * t_opt["margin_lr"])
-        col_time = int(printable_width * 0.12)
-        col_spk = int(printable_width * 0.14)
-        col_txt = int(printable_width - col_time - col_spk)
-        col_widths = [col_time, col_spk, col_txt]
+        col_time_spk = int(printable_width * 0.20)
+        col_txt = int(printable_width - col_time_spk)
+        col_widths = [col_time_spk, col_txt]
 
         t = Table(table_data, colWidths=col_widths, repeatRows=1)
 
@@ -495,7 +551,6 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
         if pdf_template == "compact_terminal":
             t_styles.extend([
                 ('LINEAFTER', (0, 0), (0, -1), t_opt["grid_width"], t_opt["grid_color"]),
-                ('LINEAFTER', (1, 0), (1, -1), t_opt["grid_width"], t_opt["grid_color"]),
                 ('LINEBELOW', (0, 0), (-1, 0), t_opt["grid_width"], t_opt["grid_color"]),
             ])
         elif t_opt["no_grid_vertical"]:
@@ -553,10 +608,8 @@ def export_transcript(transcript_path: str, format: str, export_dir: Path, max_c
 
     if format == "txt":
         out = export_txt(segments, base_path)
-    elif format == "csv":
-        out = export_csv(segments, base_path)
-    elif format == "excel":
-        out = export_excel(segments, base_path)
+    elif format == "doc":
+        out = export_doc(segments, base_path)
     elif format == "pdf":
         out = export_pdf(segments, base_path, max_chars_per_page, pdf_template)
     else:

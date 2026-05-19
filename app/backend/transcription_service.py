@@ -495,13 +495,14 @@ class TranscriptionService:
 
     @staticmethod
     def _ffmpeg_preprocess(input_path: str, output_path: str):
-        """Convert any audio/video to mono 16kHz WAV."""
+        """Convert any audio/video to mono 16kHz WAV with noise reduction & amplitude normalization."""
         ffmpeg = TranscriptionService._find_ffmpeg()
         cmd = [
             ffmpeg, "-y",
             "-threads", "0",  # Use all CPU cores for decoding (2-3x faster)
             "-i", input_path,
             "-vn",            # skip video stream decoding for huge speedup on video uploads
+            "-af", "afftdn,loudnorm", # FFT noise reduction + EBU R128 loudness normalization
             "-ac", "1",       # mono
             "-ar", "16000",   # 16 kHz
             "-acodec", "pcm_s16le",
@@ -589,6 +590,8 @@ class TranscriptionService:
         chunk_seconds: Optional[int] = None,
         on_language_detected: Optional[Callable[[str], None]] = None,
         diarization_mode: str = "accurate",
+        performance_mode: str = "auto",
+        speaker_range: str = "normal",
     ) -> List[Dict]:
         """
         Full pipeline: preprocess → chunk → transcribe → diarize → merge.
@@ -633,60 +636,99 @@ class TranscriptionService:
 
             check_pause_cancel(job_id)
             # ── Step 2.5: Load / Downloader Whisper or Qwen model ────────
-            active_model = model_name if model_name else self.model_name
+            from app.backend.hardware_detector import select_best_engine
+            best_cfg = select_best_engine(self.hw)
+            
+            # Start with specified model name or fallback to hardware default
+            base_model = model_name if model_name and model_name != "auto" else best_cfg["model"]
+            
+            # Apply performance profile settings
+            if performance_mode == "eco":
+                active_model = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
+                beam_size = 1
+            elif performance_mode == "balanced":
+                is_best_whisper_cpp = best_cfg["asr_engine"] == "whisper.cpp"
+                active_model = "medium-q5_0" if is_best_whisper_cpp else "medium"
+                if "qwen" in base_model.lower():
+                    active_model = "qwen3-asr-0.6b"
+                beam_size = 1
+            elif performance_mode == "accurate":
+                active_model = "large-v3" if "qwen" not in base_model.lower() else "qwen3-asr-1.7b"
+                beam_size = 3
+            else: # "auto" / Recommended
+                active_model = base_model
+                if active_model == best_cfg["model"]:
+                    beam_size = best_cfg["beam_size"]
+                else:
+                    is_large = "large" in active_model.lower() or "1.7b" in active_model.lower()
+                    beam_size = 3 if is_large else 1
+
             is_qwen3 = active_model and "qwen3" in active_model.lower()
+            is_whisper_cpp = "q5_0" in active_model or best_cfg["asr_engine"] == "whisper.cpp"
 
             if is_qwen3:
                 _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
                 self._load_qwen3_asr(active_model)
-            elif self.engine == "whisper.cpp":
+            elif is_whisper_cpp:
+                # If target model doesn't end in q5_0 and is not a Qwen model, use quantized GGML counterpart
+                if not active_model.endswith("-q5_0") and not active_model.startswith("qwen3"):
+                    ggml_model = f"{active_model}-q5_0"
+                else:
+                    ggml_model = active_model
                 _progress(progress_cb, 8, "モデル確認中... / Checking AI model...")
-                model_path = self._download_ggml_model(active_model, progress_cb)
+                model_path = self._download_ggml_model(ggml_model, progress_cb)
             else:
                 _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
-                self._load_whisper(model_name)
+                self._load_whisper(active_model)
 
             check_pause_cancel(job_id)
             if is_cancelled(job_id):
                 raise InterruptedError("Job cancelled")
 
             # ── Step 3: Transcribe each chunk ──────────────
-            all_segments: List[Dict] = []
-            for i, (chunk_path, offset) in enumerate(chunks):
+            import concurrent.futures
+            
+            # Determine concurrency max_workers
+            if is_qwen3 or self.device != "cpu":
+                # Qwen3 models or GPU execution are single-threaded to prevent VRAM OOM or overloading
+                max_workers = 1
+            else:
+                # CPU transcription (faster-whisper/whisper.cpp) scales with multi-core concurrent chunk processing
+                max_workers = min(3, n_chunks)
+
+            logger.info(f"Starting chunk transcription with max_workers={max_workers}")
+            
+            results = [None] * n_chunks
+            
+            def run_one_chunk(idx):
+                chunk_path, offset = chunks[idx]
                 check_pause_cancel(job_id)
                 if is_cancelled(job_id):
                     raise InterruptedError("Job cancelled")
-
-                # Emit initial chunk transcription progress
-                initial_chunk_pct = 10 + int(70 * (offset / duration)) if duration > 0 else (10 + int(70 * i / n_chunks))
-                _progress(
-                    progress_cb, initial_chunk_pct,
-                    f"文字起こし中 {i+1}/{n_chunks}... / Transcribing chunk {i+1}/{n_chunks}..."
-                )
-
+                
                 if is_qwen3:
                     segs = self._transcribe_chunk_qwen3_asr(
                         chunk_path=chunk_path,
                         offset=offset,
                         total_duration=duration,
-                        progress_cb=progress_cb,
-                        chunk_idx=i,
+                        progress_cb=None, # Disable internal progress callbacks inside concurrent threads to avoid UI flashing
+                        chunk_idx=idx,
                         n_chunks=n_chunks,
                         job_id=job_id,
-                        on_language_detected=on_language_detected if i == 0 else None,
+                        on_language_detected=on_language_detected if idx == 0 else None,
                     )
-                elif self.engine == "whisper.cpp":
+                elif is_whisper_cpp:
                     segs = self._transcribe_chunk_whisper_cpp(
                         chunk_path=chunk_path,
                         model_path=model_path,
                         language=language,
                         offset=offset,
                         total_duration=duration,
-                        progress_cb=progress_cb,
-                        chunk_idx=i,
+                        progress_cb=None,
+                        chunk_idx=idx,
                         n_chunks=n_chunks,
                         job_id=job_id,
-                        on_language_detected=on_language_detected if i == 0 else None,
+                        on_language_detected=on_language_detected if idx == 0 else None,
                     )
                 else:
                     segs = self._transcribe_chunk(
@@ -694,16 +736,58 @@ class TranscriptionService:
                         language=language,
                         offset=offset,
                         total_duration=duration,
-                        progress_cb=progress_cb,
-                        chunk_idx=i,
+                        progress_cb=None,
+                        chunk_idx=idx,
                         n_chunks=n_chunks,
                         job_id=job_id,
-                        on_language_detected=on_language_detected if i == 0 else None,
+                        on_language_detected=on_language_detected if idx == 0 else None,
                         diarization_mode=diarization_mode,
                         model_name=active_model,
+                        beam_size=beam_size,
                     )
-                all_segments.extend(segs)
-                logger.info(f"Chunk {i+1}/{n_chunks}: {len(segs)} segments")
+                return idx, segs
+
+            # Execute thread pool
+            if max_workers > 1:
+                with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+                    futures = {executor.submit(run_one_chunk, idx): idx for idx in range(n_chunks)}
+                    for fut in concurrent.futures.as_completed(futures):
+                        check_pause_cancel(job_id)
+                        if is_cancelled(job_id):
+                            raise InterruptedError("Job cancelled")
+                        try:
+                            idx, segs = fut.result()
+                            results[idx] = segs
+                            # Emit clean grouped progress updates
+                            completed = sum(1 for r in results if r is not None)
+                            prog_pct = 10 + int(70 * (completed / n_chunks))
+                            _progress(
+                                progress_cb, prog_pct,
+                                f"文字起こし中 {completed}/{n_chunks}... / Transcribing chunk {completed}/{n_chunks}..."
+                            )
+                        except Exception as e:
+                            logger.error(f"Error transcribing chunk: {e}")
+                            raise e
+            else:
+                # Fallback to sequential to guarantee exact ordered execution and callbacks
+                for idx in range(n_chunks):
+                    check_pause_cancel(job_id)
+                    if is_cancelled(job_id):
+                        raise InterruptedError("Job cancelled")
+                    
+                    initial_chunk_pct = 10 + int(70 * (chunks[idx][1] / duration)) if duration > 0 else (10 + int(70 * idx / n_chunks))
+                    _progress(
+                        progress_cb, initial_chunk_pct,
+                        f"文字起こし中 {idx+1}/{n_chunks}... / Transcribing chunk {idx+1}/{n_chunks}..."
+                    )
+                    _, segs = run_one_chunk(idx)
+                    results[idx] = segs
+                    logger.info(f"Chunk {idx+1}/{n_chunks}: {len(segs)} segments")
+
+            all_segments: List[Dict] = []
+            for segs in results:
+                if segs:
+                    all_segments.extend(segs)
 
             check_pause_cancel(job_id)
             if is_cancelled(job_id):
@@ -711,7 +795,7 @@ class TranscriptionService:
 
             # ── Step 4: Speaker diarization ────────────────
             _progress(progress_cb, 82, "話者認識中... / Detecting speakers...")
-            all_segments = self._diarize(wav_path, all_segments, num_speakers, diarization_mode, model_name=active_model)
+            all_segments = self._diarize(wav_path, all_segments, num_speakers, diarization_mode, model_name=active_model, speaker_range=speaker_range)
 
             # ── Step 5: Done ───────────────────────────────
             _progress(progress_cb, 98, "後処理中... / Finalizing...")
@@ -802,12 +886,14 @@ class TranscriptionService:
         on_language_detected: Optional[Callable[[str], None]] = None,
         diarization_mode: str = "accurate",
         model_name: Optional[str] = None,
+        beam_size: Optional[int] = None,
     ) -> List[Dict]:
         """Transcribe a single WAV chunk with faster-whisper."""
-        # Set beam_size based on model profiles (large-v3 uses beam=3, others use beam=1)
-        resolved_model = model_name if model_name else self._current_whisper_model_name
-        is_large = resolved_model and "large" in resolved_model.lower()
-        beam_size = 3 if is_large else 1
+        # Set beam_size based on model profiles if not explicitly passed
+        if beam_size is None:
+            resolved_model = model_name if model_name else self._current_whisper_model_name
+            is_large = resolved_model and "large" in resolved_model.lower()
+            beam_size = 3 if is_large else 1
 
         # If language is 'auto', we pass None to let Whisper auto-detect
         active_lang = None if language == "auto" else language
@@ -935,10 +1021,18 @@ class TranscriptionService:
         num_speakers: Optional[int] = None,
         diarization_mode: str = "accurate",
         model_name: Optional[str] = None,
+        speaker_range: str = "normal",
     ) -> List[Dict]:
         """Run Pyannote and assign speaker labels to transcript segments, splitting segments by speaker change."""
         if diarization_mode == "off":
             logger.info("Speaker diarization is disabled ('off' mode). Skipping diarization.")
+            for seg in segments:
+                seg["speaker"] = "Speaker 1"
+                seg.pop("words", None)
+            return segments
+
+        if num_speakers == 1:
+            logger.info("Single speaker requested. Bypassing diarization models and labeling all segments as 'Speaker 1'.")
             for seg in segments:
                 seg["speaker"] = "Speaker 1"
                 seg.pop("words", None)
@@ -1019,10 +1113,12 @@ class TranscriptionService:
             if num_speakers is not None and num_speakers > 0:
                 kwargs["num_speakers"] = num_speakers
             else:
-                resolved_model = model_name if model_name else self._current_whisper_model_name
-                is_large = resolved_model and "large" in resolved_model.lower()
-                kwargs["min_speakers"] = 2
-                kwargs["max_speakers"] = 15 if is_large else 7
+                if speaker_range == "large":
+                    kwargs["min_speakers"] = 2
+                    kwargs["max_speakers"] = 15
+                else:
+                    kwargs["min_speakers"] = 2
+                    kwargs["max_speakers"] = 7
             
             if diarization_mode == "fast":
                 kwargs["segmentation_step"] = 0.25

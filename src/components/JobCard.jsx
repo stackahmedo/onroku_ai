@@ -123,13 +123,20 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
   const handleExport = async (format) => {
     setExporting(true);
     try {
-      const filename = `transcript_${job.id.substring(0, 8)}.${format === 'excel' ? 'xlsx' : format}`;
+      const filename = `transcript_${job.id.substring(0, 8)}.${format}`;
 
       if (window.electron) {
         const buffer = await window.electron.api.exportTranscript(job.id, format);
         const savePath = await window.electron.file.saveDialog(filename, format);
         if (savePath) {
           await window.electron.file.write(savePath, buffer);
+          const uiLang = localStorage.getItem('ui_lang') || 'ja';
+          const msg = uiLang === 'ja'
+            ? `ファイルを正常にエクスポートしました。\n保存先: ${savePath}\n\n保存したファイルを開きますか？`
+            : `Transcript exported successfully.\nSaved to: ${savePath}\n\nWould you like to open the saved file?`;
+          if (window.confirm(msg)) {
+            await window.electron.shell.open(savePath);
+          }
         }
       } else {
         const res = await fetch(`${API}/export/${job.id}?format=${format}`, { method: 'POST' });
@@ -401,17 +408,12 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
               disabled={exporting}
             >📄 {t.exportTxt}</button>
             <button
-              id={`export-csv-${job.id.substring(0,8)}`}
-              className="btn btn-export btn-csv"
-              onClick={() => handleExport('csv')}
+              id={`export-doc-${job.id.substring(0,8)}`}
+              className="btn btn-export btn-doc"
+              onClick={() => handleExport('doc')}
               disabled={exporting}
-            >📊 {t.exportCsv}</button>
-            <button
-              id={`export-excel-${job.id.substring(0,8)}`}
-              className="btn btn-export btn-excel"
-              onClick={() => handleExport('excel')}
-              disabled={exporting}
-            >📗 {t.exportExcel}</button>
+              style={{ background: 'rgba(59, 130, 246, 0.1)', color: '#60a5fa', border: '1px solid rgba(59, 130, 246, 0.15)' }}
+            >📝 {t.exportDoc || 'DOC'}</button>
             <button
               id={`export-pdf-${job.id.substring(0,8)}`}
               className="btn btn-export btn-pdf"

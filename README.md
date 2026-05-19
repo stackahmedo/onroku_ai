@@ -1,4 +1,4 @@
-# 🎙️ Onroku AI V5.5
+# 🎙️ Onroku AI V6.0
 
 **Onroku AI** is a local-first speech transcription desktop app built with Electron, React, Python, and FastAPI.
 
@@ -6,7 +6,20 @@ It supports offline Whisper transcription, speaker diarization with pyannote, mu
 
 ---
 
-## 🚀 Overview
+## 🚀 Version 6.0 Highlights & Optimizations
+
+Onroku AI V6.0 brings dramatic speed, safety, and usability upgrades designed for local machine environments:
+
+*   **Concurrent CPU Chunk Processing:** Large audio segments are processed in parallel on multi-core CPUs via a `ThreadPoolExecutor` during transcription.
+*   **Sequential Job Scheduling Lock:** Employs a thread-safe global lock to sequence background queue runs, preventing GPU VRAM exhaustion (CUDA OOM) and system locking during batch drops.
+*   **Adaptive Diarization Bypass:** Automatically skips heavy speaker diarization models when `num_speakers` is set to `1` (single speaker mode), reducing total runtime by up to 80%.
+*   **Integrated FFmpeg Denoising & Normalization:** Native FFT-based noise reduction (`afftdn`) and EBU R128 amplitude normalization (`loudnorm`) are executed directly on the preprocessor pipeline to ensure high accuracy.
+*   **UI/UX Tab Partitioning:** Main workspace split into active `⚡ Data Processing` tasks and completed/archived `✅ Already Done` logs.
+*   **Optimized File Save & Prompts:** Confirmation dialogues print the exact save destination for exports, prompting to open them immediately with one-click Electron shell launchers.
+
+---
+
+## ✨ Key Features
 
 This repository contains:
 

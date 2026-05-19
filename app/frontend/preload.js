@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld('electron', {
   api: {
     healthCheck:      ()               => ipcRenderer.invoke('api:health'),
     getHardware:      ()               => ipcRenderer.invoke('api:hardware'),
-    upload:           (filePath, lang, model, speakerCount, chunkSeconds, diarizationMode) => ipcRenderer.invoke('api:upload', filePath, lang, model, speakerCount, chunkSeconds, diarizationMode),
+    upload:           (filePath, lang, model, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange) => ipcRenderer.invoke('api:upload', filePath, lang, model, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange),
     getJob:           (jobId)          => ipcRenderer.invoke('api:get-job', jobId),
     listJobs:         (skip, limit)    => ipcRenderer.invoke('api:list-jobs', skip, limit),
     exportTranscript: (jobId, format)  => ipcRenderer.invoke('api:export', jobId, format),
