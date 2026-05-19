@@ -1,4 +1,4 @@
-﻿# 🎙️ Onroku AI V5.5
+# 🎙️ Onroku AI V5.5
 
 **Onroku AI** is a local-first speech transcription desktop app built with Electron, React, Python, and FastAPI.
 
