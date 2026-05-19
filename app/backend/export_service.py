@@ -8,7 +8,7 @@ import csv
 import json
 import logging
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Optional, Union
 
 logger = logging.getLogger(__name__)
 
@@ -220,7 +220,16 @@ def export_excel(segments: List[Dict], export_path: Path) -> Path:
     return export_path
 
 
-def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int = 1000, pdf_template: str = "corporate") -> Path:
+def export_pdf(
+    segments: List[Dict],
+    export_path: Path,
+    max_chars_per_page: int = 1000,
+    pdf_template: str = "corporate",
+    job_filename: Optional[str] = None,
+    job_duration: Union[float, str, None] = None,
+    font_size: Optional[float] = None,
+    row_padding: Optional[float] = None
+) -> Path:
     """Export formatted A4 PDF transcript using ReportLab, dynamically styled by the selected template."""
     try:
         from reportlab.lib.pagesizes import A4
@@ -413,6 +422,12 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
             "banner_text": "SmartGrid Transcript AI - Compact Terminal Grid"
         })
 
+    if font_size is not None:
+        t_opt["fontSize"] = float(font_size)
+        t_opt["leading"] = float(font_size) + 3.0
+    if row_padding is not None:
+        t_opt["padding"] = float(row_padding)
+
     # 2. Paginate segments based on max characters per page
     pages_data = [[]]
     curr_chars = 0
@@ -511,7 +526,8 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
 
         # Build table
         table_data = [[
-            Paragraph("<b>時間 / 話者<br/>Time / Speaker</b>", header_cell_style),
+            Paragraph("<b>時間 / Time</b>", header_cell_style),
+            Paragraph("<b>話者 / Speaker</b>", header_cell_style),
             Paragraph("<b>文字起こし / Transcript</b>", header_cell_style)
         ]]
 
@@ -525,18 +541,18 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
                 speaker = speaker.replace("Speaker ", "話者")
             text = seg.get("text", "").strip()
 
-            # Stack time and speaker vertically in the first column
-            time_speaker_val = f"<b>{time_str}</b><br/>{speaker}"
             table_data.append([
-                Paragraph(time_speaker_val, body_cell_center),
+                Paragraph(time_str, body_cell_center),
+                Paragraph(speaker, body_cell_center),
                 Paragraph(text, body_cell_left)
             ])
 
-        # Dynamic Columns adaptation to margin size (2 columns: Time/Speaker and Transcript)
+        # Dynamic Columns adaptation to margin size (3 columns: Time, Speaker, Transcript)
         printable_width = 595.27 - (2 * t_opt["margin_lr"])
-        col_time_spk = int(printable_width * 0.20)
-        col_txt = int(printable_width - col_time_spk)
-        col_widths = [col_time_spk, col_txt]
+        col_time = int(printable_width * 0.18)
+        col_speaker = int(printable_width * 0.14)
+        col_txt = int(printable_width - col_time - col_speaker)
+        col_widths = [col_time, col_speaker, col_txt]
 
         t = Table(table_data, colWidths=col_widths, repeatRows=1)
 
@@ -551,6 +567,7 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
         if pdf_template == "compact_terminal":
             t_styles.extend([
                 ('LINEAFTER', (0, 0), (0, -1), t_opt["grid_width"], t_opt["grid_color"]),
+                ('LINEAFTER', (1, 0), (1, -1), t_opt["grid_width"], t_opt["grid_color"]),
                 ('LINEBELOW', (0, 0), (-1, 0), t_opt["grid_width"], t_opt["grid_color"]),
             ])
         elif t_opt["no_grid_vertical"]:
@@ -572,8 +589,6 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
 
     # 4. Built doc decorator callbacks
     def add_page_decorations(canvas, doc):
-        if pdf_template == "compact_terminal":
-            return
         canvas.saveState()
         canvas.setFont(t_opt["font"], 8)
         canvas.setFillColor(t_opt["meta_text_color"])
@@ -582,15 +597,22 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
         margin = t_opt["margin_lr"]
         width_end = 595.27 - margin
 
-        # Top page header line
-        canvas.drawString(margin, 841.89 - margin + 12, t_opt["banner_text"])
-        canvas.setStrokeColor(t_opt["line_color"])
-        canvas.setLineWidth(0.5)
-        canvas.line(margin, 841.89 - margin + 6, width_end, 841.89 - margin + 6)
+        # Top page header line (skip if compact_terminal)
+        if pdf_template != "compact_terminal":
+            canvas.drawString(margin, 841.89 - margin + 12, t_opt["banner_text"])
+            canvas.setStrokeColor(t_opt["line_color"])
+            canvas.setLineWidth(0.5)
+            canvas.line(margin, 841.89 - margin + 6, width_end, 841.89 - margin + 6)
 
         # Bottom page footer line
-        canvas.drawString(margin, 15, "Transcript AI V2 (Space-Optimized Compact Printing)")
-        canvas.drawRightString(width_end, 15, f"ページ {doc.page} / Page {doc.page}")
+        if isinstance(job_duration, (int, float)):
+            formatted_duration = _fmt_time(job_duration)
+        elif isinstance(job_duration, str) and job_duration.strip():
+            formatted_duration = job_duration.strip()
+        else:
+            formatted_duration = "00:00"
+        footer_text = f"ファイル名 / File: {job_filename or 'Unknown'}   |   録音時間 / Duration: {formatted_duration}   |   ページ {doc.page} / Page {doc.page}"
+        canvas.drawCentredString(297.63, 15, footer_text)
         canvas.restoreState()
 
     doc.build(story, onFirstPage=add_page_decorations, onLaterPages=add_page_decorations)
@@ -598,7 +620,17 @@ def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int 
     return export_path
 
 
-def export_transcript(transcript_path: str, format: str, export_dir: Path, max_chars_per_page: int = 1000, pdf_template: str = "corporate") -> str:
+def export_transcript(
+    transcript_path: str,
+    format: str,
+    export_dir: Path,
+    max_chars_per_page: int = 1000,
+    pdf_template: str = "corporate",
+    job_filename: Optional[str] = None,
+    job_duration: Union[float, str, None] = None,
+    font_size: Optional[float] = None,
+    row_padding: Optional[float] = None
+) -> str:
     """Load JSON segments and export in the requested format."""
     with open(transcript_path, "r", encoding="utf-8") as f:
         segments = json.load(f)
@@ -611,7 +643,7 @@ def export_transcript(transcript_path: str, format: str, export_dir: Path, max_c
     elif format == "doc":
         out = export_doc(segments, base_path)
     elif format == "pdf":
-        out = export_pdf(segments, base_path, max_chars_per_page, pdf_template)
+        out = export_pdf(segments, base_path, max_chars_per_page, pdf_template, job_filename, job_duration, font_size, row_padding)
     else:
         raise ValueError(f"Unknown export format: {format}")
 

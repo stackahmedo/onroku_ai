@@ -50,6 +50,10 @@ export default function App() {
   const [txtInputText, setTxtInputText] = useState('');
   const [txtPdfTemplate, setTxtPdfTemplate] = useState('compact_terminal');
   const [txtMaxChars, setTxtMaxChars] = useState(1000);
+  const [txtFilename, setTxtFilename] = useState('');
+  const [txtDuration, setTxtDuration] = useState('');
+  const [txtFontSize, setTxtFontSize] = useState('');
+  const [txtRowPadding, setTxtRowPadding] = useState('');
   const [isConvertingTxt, setIsConvertingTxt] = useState(false);
   const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
 
@@ -464,6 +468,101 @@ export default function App() {
     showToast(uiLang === 'ja' ? 'サンプルデータを読み込みました！' : 'Sample grid data loaded!', 'info');
   };
 
+  const renderPdfCustomizerForm = () => {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        
+        {/* Template Select */}
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+            🎨 {uiLang === 'ja' ? 'PDFデザインテンプレート' : 'PDF Design Template'}
+          </label>
+          <select
+            value={txtPdfTemplate}
+            onChange={(e) => setTxtPdfTemplate(e.target.value)}
+            className="settings-select"
+            style={{ width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+          >
+            <option value="corporate">💼 Corporate Slate</option>
+            <option value="eco">🌱 Eco-Friendly Minimalist</option>
+            <option value="cyberpunk">⚡ Cyberpunk Obsidian</option>
+            <option value="emerald">💚 Royal Emerald</option>
+            <option value="amber">🍊 Warm Amber Editorial</option>
+            <option value="serif_court">📜 Formal Court Serif</option>
+            <option value="cherry_blossom">🌸 Cherry Blossom Sakura</option>
+            <option value="crimson">🔴 Executive Crimson</option>
+            <option value="indigo">💜 Modern Indigo</option>
+            <option value="accessibility">♿ High-Contrast Accessible</option>
+            <option value="compact_terminal">💻 Compact Terminal Grid</option>
+          </select>
+        </div>
+
+        {/* Custom Filename */}
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+            📝 {uiLang === 'ja' ? 'カスタムファイル名 (フッター表示)' : 'Custom File Name (Footer)'}
+          </label>
+          <input
+            type="text"
+            value={txtFilename}
+            onChange={(e) => setTxtFilename(e.target.value)}
+            placeholder={uiLang === 'ja' ? '例: 会議議事録' : 'e.g. Meeting Minutes'}
+            style={{ width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+          />
+        </div>
+
+        {/* Custom Duration */}
+        <div>
+          <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+            ⏱️ {uiLang === 'ja' ? '録音時間 / 表示用 (例: 45:10)' : 'Recording Duration (e.g. 45:10)'}
+          </label>
+          <input
+            type="text"
+            value={txtDuration}
+            onChange={(e) => setTxtDuration(e.target.value)}
+            placeholder="00:00"
+            style={{ width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+          />
+        </div>
+
+        {/* Custom Font Size & Row Padding */}
+        <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ flex: 1 }}>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+              🔤 {uiLang === 'ja' ? '文字サイズ (pt)' : 'Font Size (pt)'}
+            </label>
+            <input
+              type="number"
+              min="6"
+              max="16"
+              step="0.5"
+              value={txtFontSize}
+              onChange={(e) => setTxtFontSize(e.target.value)}
+              placeholder="8"
+              style={{ width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}
+            />
+          </div>
+
+          <div style={{ flex: 1 }}>
+            <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+              ↕️ {uiLang === 'ja' ? '行間余白 (pt)' : 'Row Padding (pt)'}
+            </label>
+            <input
+              type="number"
+              min="0.5"
+              max="12"
+              step="0.5"
+              value={txtRowPadding}
+              onChange={(e) => setTxtRowPadding(e.target.value)}
+              placeholder="3"
+              style={{ width: '100%', padding: '6px 8px', fontSize: '12px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}
+            />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const handleConvertTxtToPdf = async (shouldDownload = false) => {
     const trimmed = txtInputText.trim();
     if (!trimmed) {
@@ -482,6 +581,10 @@ export default function App() {
           text: trimmed,
           pdf_template: txtPdfTemplate,
           max_chars: txtMaxChars,
+          custom_filename: txtFilename || undefined,
+          custom_duration: txtDuration || undefined,
+          font_size: txtFontSize ? parseFloat(txtFontSize) : undefined,
+          row_padding: txtRowPadding ? parseFloat(txtRowPadding) : undefined,
         }),
       });
       
@@ -1044,38 +1147,104 @@ export default function App() {
                       />
                     </div>
 
-                    {/* Compact layout controls when preview is active */}
+                    {/* Settings grid when preview is active */}
                     {pdfPreviewUrl && (
-                      <div style={{ width: '220px' }}>
-                        <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-                          {t.txtConvLabelMinChars}
-                        </label>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <input
-                            type="range"
-                            min="100"
-                            max="5000"
-                            step="100"
-                            value={txtMaxChars}
-                            onChange={(e) => setTxtMaxChars(parseInt(e.target.value))}
-                            style={{ flex: 1, cursor: 'pointer' }}
-                          />
-                          <input
-                            type="number"
-                            min="50"
-                            value={txtMaxChars}
-                            onChange={(e) => setTxtMaxChars(Math.max(50, parseInt(e.target.value) || 1000))}
-                            style={{
-                              width: '60px',
-                              background: 'rgba(0, 0, 0, 0.2)',
-                              color: '#fff',
-                              border: '1px solid var(--clr-border)',
-                              borderRadius: 'var(--radius-sm)',
-                              padding: '2px 4px',
-                              fontSize: '11px',
-                              textAlign: 'center'
-                            }}
-                          />
+                      <div style={{ background: 'rgba(255,255,255,0.01)', border: '1px solid rgba(255,255,255,0.05)', padding: '12px', borderRadius: 'var(--radius-md)', display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '10px', flex: 1 }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              📄 {t.txtConvLabelMinChars}
+                            </label>
+                            <input
+                              type="number"
+                              min="50"
+                              value={txtMaxChars}
+                              onChange={(e) => setTxtMaxChars(Math.max(50, parseInt(e.target.value) || 1000))}
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+                            />
+                          </div>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              🎨 {uiLang === 'ja' ? 'テンプレート' : 'Template'}
+                            </label>
+                            <select
+                              value={txtPdfTemplate}
+                              onChange={(e) => setTxtPdfTemplate(e.target.value)}
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+                            >
+                              <option value="corporate">💼 Corporate</option>
+                              <option value="eco">🌱 Eco-Friendly</option>
+                              <option value="cyberpunk">⚡ Cyberpunk</option>
+                              <option value="emerald">💚 Emerald</option>
+                              <option value="amber">🍊 Amber</option>
+                              <option value="serif_court">📜 Serif Court</option>
+                              <option value="cherry_blossom">🌸 Sakura</option>
+                              <option value="crimson">🔴 Crimson</option>
+                              <option value="indigo">💜 Indigo</option>
+                              <option value="accessibility">♿ Accessible</option>
+                              <option value="compact_terminal">💻 Compact Terminal</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              📝 {uiLang === 'ja' ? 'ファイル名' : 'File Name'}
+                            </label>
+                            <input
+                              type="text"
+                              value={txtFilename}
+                              onChange={(e) => setTxtFilename(e.target.value)}
+                              placeholder={uiLang === 'ja' ? '会議議事録' : 'e.g. Minutes'}
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+                            />
+                          </div>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              ⏱️ {uiLang === 'ja' ? '録音時間' : 'Duration'}
+                            </label>
+                            <input
+                              type="text"
+                              value={txtDuration}
+                              onChange={(e) => setTxtDuration(e.target.value)}
+                              placeholder="00:00"
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)' }}
+                            />
+                          </div>
+                        </div>
+
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              🔤 {uiLang === 'ja' ? '文字サイズ' : 'Font Size'}
+                            </label>
+                            <input
+                              type="number"
+                              min="6"
+                              max="16"
+                              step="0.5"
+                              value={txtFontSize}
+                              onChange={(e) => setTxtFontSize(e.target.value)}
+                              placeholder="8"
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}
+                            />
+                          </div>
+                          <div>
+                            <label className="settings-label" style={{ fontSize: '11px', display: 'block', marginBottom: '4px' }}>
+                              ↕️ {uiLang === 'ja' ? '行余白' : 'Padding'}
+                            </label>
+                            <input
+                              type="number"
+                              min="0.5"
+                              max="12"
+                              step="0.5"
+                              value={txtRowPadding}
+                              onChange={(e) => setTxtRowPadding(e.target.value)}
+                              placeholder="3"
+                              style={{ width: '100%', padding: '4px 6px', fontSize: '11px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--clr-border)', color: '#fff', borderRadius: 'var(--radius-sm)', textAlign: 'center' }}
+                            />
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1112,7 +1281,7 @@ export default function App() {
                     {/* Compaction Slider / Number */}
                     <div>
                       <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-                        {t.txtConvLabelMinChars}
+                        📄 {t.txtConvLabelMinChars}
                       </label>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                         <input
@@ -1145,6 +1314,8 @@ export default function App() {
                         {uiLang === 'ja' ? '※多いほどページ数が凝縮されます' : '* Higher value yields fewer total pages'}
                       </span>
                     </div>
+
+                    {renderPdfCustomizerForm()}
 
                     <div style={{ marginTop: 'auto', paddingTop: '10px' }}>
                       <button

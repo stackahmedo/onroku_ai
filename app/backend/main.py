@@ -605,7 +605,15 @@ async def export(job_id: str, format: str = Query(default="doc")):
         else:
             target_dir = EXPORT_DIR
 
-        out_path = export_transcript(job["transcript_file"], format, target_dir, max_chars, pdf_template)
+        out_path = export_transcript(
+            job["transcript_file"],
+            format,
+            target_dir,
+            max_chars,
+            pdf_template,
+            job_filename=job.get("filename"),
+            job_duration=job.get("duration_seconds")
+        )
         filename = f"transcript_{job_id[:8]}.{ext_map[format]}"
         return FileResponse(
             out_path,
@@ -737,6 +745,21 @@ async def convert_txt_to_pdf(payload: dict):
     text = payload.get("text", "").strip()
     pdf_template = payload.get("pdf_template", "compact_terminal")
     max_chars = int(payload.get("max_chars", 1000))
+    custom_filename = payload.get("custom_filename")
+    custom_duration = payload.get("custom_duration")
+    font_size = payload.get("font_size")
+    row_padding = payload.get("row_padding")
+
+    if font_size is not None:
+        try:
+            font_size = float(font_size)
+        except ValueError:
+            font_size = None
+    if row_padding is not None:
+        try:
+            row_padding = float(row_padding)
+        except ValueError:
+            row_padding = None
 
     if not text:
         raise HTTPException(status_code=400, detail="Text content cannot be empty")
@@ -839,7 +862,11 @@ async def convert_txt_to_pdf(payload: dict):
             segments=segments,
             export_path=out_pdf_path,
             max_chars_per_page=max_chars,
-            pdf_template=pdf_template
+            pdf_template=pdf_template,
+            job_filename=custom_filename,
+            job_duration=custom_duration,
+            font_size=font_size,
+            row_padding=row_padding
         )
         if not out_pdf_path.exists():
             raise HTTPException(status_code=500, detail="PDF generation failed")
