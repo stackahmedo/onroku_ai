@@ -1,6 +1,6 @@
 // i18n/en.js  –  English UI strings
 const en = {
-  appTitle: "Onroku AI",
+  appTitle: "Onroku AI 6.5",
   appSubtitle: "Offline Multi-Speaker Japanese Transcription",
   dropzonePrompt: "Drag & drop audio / video here",
   dropzoneOr: "or",

@@ -16,6 +16,7 @@ const isDev   = process.env.NODE_ENV === 'development' || process.argv.includes(
 // ── Window ─────────────────────────────────────────────────
 function createWindow() {
   mainWindow = new BrowserWindow({
+    title:  'Onroku AI 6.5',
     width:  1280,
     height: 860,
     minWidth:  900,
@@ -320,9 +321,9 @@ function buildMenu() {
           label: 'About / このアプリについて',
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
-            title: 'Onroku AI',
-            message: 'Onroku AI V6.0',
-            detail: 'Offline Multi-Speaker Transcription V6.0\nPowered by faster-whisper & Pyannote',
+            title: 'Onroku AI 6.5',
+            message: 'Onroku AI V6.5',
+            detail: 'Offline Multi-Speaker Transcription V6.5\nPowered by faster-whisper & Pyannote',
           }),
         },
         {

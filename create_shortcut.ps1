@@ -3,6 +3,7 @@ $DesktopPath = [Environment]::GetFolderPath("Desktop")
 
 # Clean up legacy shortcuts
 $OldShortcuts = @(
+    "$DesktopPath\Onroku AI.lnk",
     "$DesktopPath\Transcript V4.lnk",
     "$DesktopPath\Transcript V3.lnk",
     "$DesktopPath\Transcript V2.lnk",
@@ -15,13 +16,13 @@ foreach ($old in $OldShortcuts) {
     }
 }
 
-# Create new Onroku AI shortcut
-$Shortcut = $WshShell.CreateShortcut("$DesktopPath\Onroku AI.lnk")
+# Create new Onroku AI 6.5 shortcut
+$Shortcut = $WshShell.CreateShortcut("$DesktopPath\Onroku AI 6.5.lnk")
 $Shortcut.TargetPath = "powershell.exe"
 $Shortcut.Arguments = "-ExecutionPolicy Bypass -WindowStyle Hidden -Command `"Set-Location 'i:\smart_grid_home\projects\transcript_ai_v2'; .\start_prod.bat`""
 $Shortcut.WorkingDirectory = "i:\smart_grid_home\projects\transcript_ai_v2"
 $Shortcut.IconLocation = "$($Shortcut.WorkingDirectory)\public\icon.ico"
-$Shortcut.Description = "Onroku AI V6.0 - Whisper Large V3 Offline Speech-to-Text"
+$Shortcut.Description = "Onroku AI V6.5 - Whisper Large V3 Offline Speech-to-Text"
 $Shortcut.Save()
 
-Write-Host "Shortcut 'Onroku AI' created successfully on the Desktop with hidden background execution."
+Write-Host "Shortcut 'Onroku AI 6.5' created successfully on the Desktop with hidden background execution."

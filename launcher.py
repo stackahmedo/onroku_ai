@@ -125,7 +125,7 @@ def cleanup(sig=None, frame=None):
 
 def main():
     print("=" * 56)
-    print(f"  🎙️  Onroku AI V6.0  –  Application Launcher ({'PROD' if IS_PROD else 'DEV'})")
+    print(f"  🎙️  Onroku AI V6.5  –  Application Launcher ({'PROD' if IS_PROD else 'DEV'})")
     print("=" * 56)
 
     signal.signal(signal.SIGINT,  cleanup)

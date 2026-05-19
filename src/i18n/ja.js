@@ -1,6 +1,6 @@
 // i18n/ja.js  –  Japanese UI strings
 const ja = {
-  appTitle: "音録AI",
+  appTitle: "音録AI 6.5",
   appSubtitle: "オフライン多話者日本語文字起こし",
   dropzonePrompt: "音声・動画ファイルをここにドラッグ＆ドロップ",
   dropzoneOr: "または",
