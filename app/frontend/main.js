@@ -112,14 +112,16 @@ ipcMain.handle('win:restart', () => {
   app.relaunch();
   app.exit(0);
 });
-ipcMain.handle('win:confirm', async (event, options) => {
+ipcMain.handle('win:confirm', async (event, options = {}) => {
+  const buttons = options.buttons || ['OK', 'Cancel'];
+  const cancelId = buttons.length > 1 ? 1 : 0;
   const result = await dialog.showMessageBox(mainWindow, {
     type: 'question',
-    buttons: options.buttons || ['OK', 'Cancel'],
+    buttons: buttons,
     defaultId: 0,
-    cancelId: 1,
+    cancelId: cancelId,
     title: options.title || 'Onroku AI',
-    message: options.message,
+    message: options.message || '',
     detail: options.detail || '',
   });
   return result.response === 0;
@@ -277,10 +279,23 @@ ipcMain.handle('file:open-dialog', async () => {
   return result.canceled ? null : result.filePaths;
 });
 
-ipcMain.handle('file:save-dialog', async (event, filename) => {
+ipcMain.handle('file:save-dialog', async (event, filename, format) => {
+  const filters = [];
+  if (format) {
+    const ext = format.toLowerCase();
+    let name = format.toUpperCase();
+    if (ext === 'txt') name = 'Text Documents';
+    else if (ext === 'docx' || ext === 'doc') name = 'Word Documents';
+    else if (ext === 'pdf') name = 'PDF Files';
+    else if (ext === 'csv') name = 'CSV Sheets';
+    else if (ext === 'xlsx') name = 'Excel Spreadsheets';
+    filters.push({ name: `${name} (*.${ext})`, extensions: [ext] });
+  }
+  filters.push({ name: 'All Files (*.*)', extensions: ['*'] });
+
   const result = await dialog.showSaveDialog(mainWindow, {
     defaultPath: filename,
-    filters: [{ name: 'All Files', extensions: ['*'] }],
+    filters: filters,
   });
   return result.canceled ? null : result.filePath;
 });
