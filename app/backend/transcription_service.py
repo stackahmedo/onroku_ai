@@ -140,12 +140,10 @@ class TranscriptionService:
             "download_root": str(model_dir),
         }
         if self.device == "cpu":
-            # Fully utilize all logical CPU cores during inference for maximum priority speed
-            kwargs["cpu_threads"] = self.hw["cpu_cores"]
+            kwargs["cpu_threads"] = max(2, min(4, self.hw.get("cpu_cores", 4)))
             kwargs["num_workers"] = 1
         else:
-            # Maximize CUDA pipeline occupancy with multiple parallel GPU workers
-            kwargs["num_workers"] = 2
+            kwargs["num_workers"] = 1
 
         self._whisper_model = WhisperModel(
             target_model,
@@ -183,8 +181,7 @@ class TranscriptionService:
         else:
             dtype = torch.float32
             device_map = "cpu"
-            # For maximum multi-core PyTorch CPU execution
-            torch.set_num_threads(self.hw["cpu_cores"])
+            torch.set_num_threads(max(2, min(4, self.hw.get("cpu_cores", 4))))
             
         logger.info(f"Loading Qwen3-ASR model: {model_name} from {model_path_to_load} on {device_map} with dtype {dtype}...")
         
@@ -406,8 +403,7 @@ class TranscriptionService:
             )
             device = torch.device(self.device if self.device == "cuda" else "cpu")
             if device.type == "cpu":
-                # For maximum multi-core PyTorch CPU execution
-                torch.set_num_threads(self.hw["cpu_cores"])
+                torch.set_num_threads(max(2, min(4, self.hw.get("cpu_cores", 4))))
             
             self._pyannote_pipeline.to(device)
 
@@ -704,6 +700,7 @@ class TranscriptionService:
                         job_id=job_id,
                         on_language_detected=on_language_detected if i == 0 else None,
                         diarization_mode=diarization_mode,
+                        model_name=active_model,
                     )
                 all_segments.extend(segs)
                 logger.info(f"Chunk {i+1}/{n_chunks}: {len(segs)} segments")
@@ -714,7 +711,7 @@ class TranscriptionService:
 
             # ── Step 4: Speaker diarization ────────────────
             _progress(progress_cb, 82, "話者認識中... / Detecting speakers...")
-            all_segments = self._diarize(wav_path, all_segments, num_speakers, diarization_mode)
+            all_segments = self._diarize(wav_path, all_segments, num_speakers, diarization_mode, model_name=active_model)
 
             # ── Step 5: Done ───────────────────────────────
             _progress(progress_cb, 98, "後処理中... / Finalizing...")
@@ -804,17 +801,16 @@ class TranscriptionService:
         job_id: str = "",
         on_language_detected: Optional[Callable[[str], None]] = None,
         diarization_mode: str = "accurate",
+        model_name: Optional[str] = None,
     ) -> List[Dict]:
         """Transcribe a single WAV chunk with faster-whisper."""
-        # Optimize beam search decoding for CPU to speed up inference (beam_size=1 is greedy, up to 3x faster)
-        beam_size = 1 if self.device == "cpu" else 5
+        # Set beam_size based on model profiles (large-v3 uses beam=3, others use beam=1)
+        resolved_model = model_name if model_name else self._current_whisper_model_name
+        is_large = resolved_model and "large" in resolved_model.lower()
+        beam_size = 3 if is_large else 1
 
         # If language is 'auto', we pass None to let Whisper auto-detect
         active_lang = None if language == "auto" else language
-
-        # Smart word_timestamps: only enable when diarization needs word-level speaker splits
-        # Disabling word_timestamps gives 30-50% speed boost on CPU
-        need_word_ts = diarization_mode != "off"
 
         segments_out = []
         try:
@@ -823,13 +819,9 @@ class TranscriptionService:
                 language=active_lang,
                 beam_size=beam_size,
                 vad_filter=True,
-                vad_parameters={
-                    "min_silence_duration_ms": 800,   # Skip longer silence gaps (faster)
-                    "speech_pad_ms": 200,              # Tighter speech boundary detection
-                    "threshold": 0.35,                 # More sensitive VAD (catches quiet speech)
-                },
-                word_timestamps=need_word_ts,
-                condition_on_previous_text=False,  # Prevent hallucination loops & ~10-15% speed boost
+                vad_parameters={"min_silence_duration_ms": 500},
+                word_timestamps=True,  # Mandatory for speaker label merging
+                condition_on_previous_text=False,  # Prevent hallucination loops & speed boost
             )
             logger.info(
                 f"  Detected language: {info.language} "
@@ -936,7 +928,14 @@ class TranscriptionService:
             logger.error(f"Sherpa-ONNX diarization process failed: {e}", exc_info=True)
             return []
 
-    def _diarize(self, wav_path: str, segments: List[Dict], num_speakers: Optional[int] = None, diarization_mode: str = "accurate") -> List[Dict]:
+    def _diarize(
+        self,
+        wav_path: str,
+        segments: List[Dict],
+        num_speakers: Optional[int] = None,
+        diarization_mode: str = "accurate",
+        model_name: Optional[str] = None,
+    ) -> List[Dict]:
         """Run Pyannote and assign speaker labels to transcript segments, splitting segments by speaker change."""
         if diarization_mode == "off":
             logger.info("Speaker diarization is disabled ('off' mode). Skipping diarization.")
@@ -1019,6 +1018,11 @@ class TranscriptionService:
             kwargs = {}
             if num_speakers is not None and num_speakers > 0:
                 kwargs["num_speakers"] = num_speakers
+            else:
+                resolved_model = model_name if model_name else self._current_whisper_model_name
+                is_large = resolved_model and "large" in resolved_model.lower()
+                kwargs["min_speakers"] = 2
+                kwargs["max_speakers"] = 15 if is_large else 7
             
             if diarization_mode == "fast":
                 kwargs["segmentation_step"] = 0.25
