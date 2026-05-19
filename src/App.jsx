@@ -25,6 +25,7 @@ export default function App() {
   const [transcribeModel, setTranscribeModel] = useState('auto');
   const [speakerCount, setSpeakerCount] = useState('auto');
   const [chunkSeconds, setChunkSeconds] = useState('auto');
+  const [diarizationMode, setDiarizationMode] = useState('accurate');
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [jobs, setJobs]               = useState([]);
   const [loading, setLoading]         = useState(false);
@@ -62,6 +63,9 @@ export default function App() {
   const [logs, setLogs] = useState([]);
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  const [exportedFiles, setExportedFiles] = useState([]);
+  const [exportsDir, setExportsDir] = useState('');
+  const [isLoadingExports, setIsLoadingExports] = useState(false);
   const terminalBodyRef = useRef(null);
 
   // Sync theme changes to localStorage
@@ -304,6 +308,71 @@ export default function App() {
     return () => clearInterval(id);
   }, [loadJobs]);
 
+  // ── Load Exported Files ──────────────────────────────────
+  const loadExportedFiles = useCallback(async () => {
+    setIsLoadingExports(true);
+    try {
+      const res = await fetch(`${API}/exports`);
+      if (res.ok) {
+        const data = await res.json();
+        setExportedFiles(data.files || []);
+        setExportsDir(data.export_dir || '');
+      }
+    } catch (err) {
+      console.error('loadExportedFiles error:', err);
+    } finally {
+      setIsLoadingExports(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (activeTab === 'exports') {
+      loadExportedFiles();
+    }
+  }, [activeTab, loadExportedFiles]);
+
+  const handleDeleteExportFile = async (fileName) => {
+    if (!window.confirm(t.exportsConfirmDelete || 'Are you sure?')) return;
+    try {
+      const res = await fetch(`${API}/exports/${encodeURIComponent(fileName)}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        showToast(uiLang === 'ja' ? 'ファイルを削除しました！' : 'File deleted successfully!', 'success');
+        loadExportedFiles();
+      } else {
+        showToast(uiLang === 'ja' ? 'ファイルの削除に失敗しました' : 'Failed to delete file', 'error');
+      }
+    } catch (err) {
+      showToast(`Error: ${err.message}`, 'error');
+    }
+  };
+
+  const handleOpenExportsFolder = async () => {
+    if (window.electron && exportsDir) {
+      await window.electron.shell.open(exportsDir);
+    } else {
+      alert('フォルダを開けません / Cannot open folder (Only supported in Electron app)');
+    }
+  };
+
+  const handleOpenExportFile = async (file) => {
+    if (window.electron && file.absolute_path) {
+      await window.electron.shell.open(file.absolute_path);
+    } else {
+      const a = document.createElement('a');
+      a.href = `${API}/exports/${encodeURIComponent(file.name)}/download`;
+      a.download = file.name;
+      a.click();
+    }
+  };
+
+  const handleShowExportInFolder = async (file) => {
+    if (window.electron && file.absolute_path) {
+      await window.electron.shell.showItem(file.absolute_path);
+    }
+  };
+
   // ── Toast helper ──────────────────────────────────────────
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type });
@@ -415,7 +484,7 @@ export default function App() {
         if (window.electron && (file._isPath || file.path)) {
           // Electron path (both browsed and dropped files support IPC upload)
           setUploadProgress(50);
-          response = await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds);
+          response = await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode);
           setUploadProgress(100);
         } else {
           // Browser / React dev fallback
@@ -426,7 +495,7 @@ export default function App() {
             const xhr = new XMLHttpRequest();
             const speakerParam = speakerCount && speakerCount !== 'auto' ? `&speaker_count=${speakerCount}` : '';
             const chunkParam = chunkSeconds && chunkSeconds !== 'auto' ? `&chunk_seconds=${chunkSeconds}` : '';
-            xhr.open('POST', `${API}/upload?language=${transcribeLang}&model=${transcribeModel}${speakerParam}${chunkParam}`);
+            xhr.open('POST', `${API}/upload?language=${transcribeLang}&model=${transcribeModel}${speakerParam}${chunkParam}&diarization_mode=${diarizationMode}`);
 
             xhr.upload.addEventListener('progress', (e) => {
               if (e.lengthComputable) {
@@ -628,33 +697,34 @@ export default function App() {
                 value={transcribeModel}
                 onChange={e => setTranscribeModel(e.target.value)}
               >
-                <option value="auto">Auto</option>
-                <option value="large-v3">large-v3</option>
-                <option value="medium">medium</option>
-                <option value="small">small</option>
-                <option value="base">base</option>
-                <option value="tiny">tiny</option>
+                <option value="auto">Auto (Whisper)</option>
+                <option value="large-v3">Whisper large-v3</option>
+                <option value="medium">Whisper medium</option>
+                <option value="small">Whisper small</option>
+                <option value="base">Whisper base</option>
+                <option value="tiny">Whisper tiny</option>
+                <option value="qwen3-asr-0.6b">{t.modelQwen3Asr06b || "Qwen3-ASR 0.6B"}</option>
+                <option value="qwen3-asr-1.7b">{t.modelQwen3Asr17b || "Qwen3-ASR 1.7B"}</option>
               </select>
             </div>
 
-            {/* Speaker count selector */}
+            {/* Unified 2-Option Speakers Control (Enable / Disable) */}
             <div className="lang-select-row">
-              <label htmlFor="speaker-count-select" className="lang-select-label">
-                👥 {t.speakers || '話者数'}
+              <label htmlFor="diarization-mode-select" className="lang-select-label">
+                👥 {uiLang === 'ja' ? '話者検出 / Speakers' : 'Speakers'}
               </label>
               <select
-                id="speaker-count-select"
+                id="diarization-mode-select"
                 className="lang-select"
-                value={speakerCount}
-                onChange={e => setSpeakerCount(e.target.value)}
+                value={diarizationMode}
+                onChange={e => {
+                  const val = e.target.value;
+                  setDiarizationMode(val);
+                  setSpeakerCount(val === 'accurate' ? 'auto' : '1');
+                }}
               >
-                <option value="auto">{uiLang === 'ja' ? '自動検出 / Auto' : 'Auto Detect'}</option>
-                <option value="1">1</option>
-                <option value="2">2 (推奨 / Recommended)</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6">6</option>
+                <option value="accurate">{t.diarizationModeEnabled || '有効 (話者検出あり) / Enabled'}</option>
+                <option value="off">{t.diarizationModeDisabled || '無効 (話者検出なし) / Disabled'}</option>
               </select>
             </div>
 
@@ -729,6 +799,13 @@ export default function App() {
                 id="tab-btn-txt-converter"
               >
                 📕 {t.tabTxtConverter}
+              </button>
+              <button
+                className={`tab-btn ${activeTab === 'exports' ? 'tab-btn--active' : ''}`}
+                onClick={() => setActiveTab('exports')}
+                id="tab-btn-exports"
+              >
+                📂 {t.tabExports || '出力ファイル'}
               </button>
               <button
                 className={`tab-btn ${activeTab === 'settings' ? 'tab-btn--active' : ''}`}
@@ -996,6 +1073,168 @@ export default function App() {
                 )}
 
               </div>
+            </div>
+          ) : activeTab === 'exports' ? (
+            <div className="exports-section glass-panel" style={{ padding: '24px', borderRadius: 'var(--radius-lg)', color: 'var(--clr-text-primary)' }}>
+              {/* Header with Title and native action triggers */}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '12px' }}>
+                <div style={{ textAlign: 'left' }}>
+                  <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '6px', color: 'var(--clr-primary, #6366f1)', margin: 0 }}>
+                    📂 {t.exportsTitle || '出力ファイル管理'}
+                  </h2>
+                  <p className="app-subtitle" style={{ fontSize: '13px', color: 'var(--clr-text-muted)', margin: 0 }}>
+                    {t.exportsSubtitle || 'これまでにエクスポートされたドキュメントの一覧を表示・管理します。'}
+                  </p>
+                </div>
+                <div style={{ display: 'flex', gap: '10px' }}>
+                  {window.electron && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      onClick={handleOpenExportsFolder}
+                      style={{ padding: '8px 14px', fontSize: '12px' }}
+                    >
+                      📂 {t.exportsShowFolder || 'フォルダを開く'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={loadExportedFiles}
+                    disabled={isLoadingExports}
+                    style={{ padding: '8px 14px', fontSize: '12px' }}
+                  >
+                    🔄 {isLoadingExports ? '...' : (uiLang === 'ja' ? '更新' : 'Refresh')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Exports Folder Path Display */}
+              {exportsDir && (
+                <div style={{
+                  background: 'rgba(255, 255, 255, 0.02)',
+                  border: '1px solid rgba(255, 255, 255, 0.05)',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '8px 12px',
+                  fontSize: '12px',
+                  color: 'var(--clr-text-muted)',
+                  textAlign: 'left',
+                  marginBottom: '20px',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis'
+                }} title={exportsDir}>
+                  <strong>📁 {uiLang === 'ja' ? '現在の保存先: ' : 'Active Directory: '}</strong> {exportsDir}
+                </div>
+              )}
+
+              {/* Files list or empty state */}
+              {isLoadingExports ? (
+                <div className="empty-state" style={{ padding: '60px 0' }}>
+                  <span className="empty-icon" style={{ animation: 'spin 2s linear infinite' }}>🔄</span>
+                  <p>{uiLang === 'ja' ? '読み込み中...' : 'Loading files...'}</p>
+                </div>
+              ) : exportedFiles.length === 0 ? (
+                <div className="empty-state" style={{ padding: '60px 0' }}>
+                  <span className="empty-icon">📁</span>
+                  <p>{t.exportsEmpty || '出力ファイルがありません。'}</p>
+                </div>
+              ) : (
+                <div className="exports-table-wrapper" style={{ overflowX: 'auto', background: 'rgba(0,0,0,0.1)', borderRadius: 'var(--radius-md)', border: '1px solid var(--clr-border)' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+                    <thead>
+                      <tr style={{ background: 'rgba(255, 255, 255, 0.03)', borderBottom: '1px solid var(--clr-border)' }}>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--clr-text-muted)' }}>{uiLang === 'ja' ? '種類' : 'Type'}</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--clr-text-muted)' }}>{uiLang === 'ja' ? 'ファイル名' : 'Name'}</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--clr-text-muted)' }}>{uiLang === 'ja' ? 'サイズ' : 'Size'}</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--clr-text-muted)' }}>{uiLang === 'ja' ? '生成日時' : 'Date Created'}</th>
+                        <th style={{ padding: '12px 16px', fontWeight: '600', color: 'var(--clr-text-muted)', textAlign: 'right' }}>{uiLang === 'ja' ? 'アクション' : 'Actions'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {exportedFiles.map((file, idx) => {
+                        // Custom format colors and icons
+                        const formatConfig = {
+                          xlsx: { icon: '📗', color: '#22c55e', label: 'Excel' },
+                          pdf:  { icon: '📕', color: '#ef4444', label: 'PDF' },
+                          csv:  { icon: '📊', color: '#3b82f6', label: 'CSV' },
+                          txt:  { icon: '📄', color: '#94a3b8', label: 'TXT' }
+                        }[file.format] || { icon: '📄', color: 'var(--clr-text-muted)', label: file.format.toUpperCase() };
+
+                        const formattedSize = file.size_bytes > 1024 * 1024
+                          ? `${(file.size_bytes / 1024 / 1024).toFixed(1)} MB`
+                          : `${(file.size_bytes / 1024).toFixed(1)} KB`;
+
+                        const formattedDate = new Date(file.created_at).toLocaleString();
+
+                        return (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', transition: 'background 0.2s', cursor: 'pointer' }} className="exports-row">
+                            <td style={{ padding: '12px 16px' }}>
+                              <span style={{
+                                background: `${formatConfig.color}15`,
+                                color: formatConfig.color,
+                                padding: '4px 8px',
+                                borderRadius: '4px',
+                                fontSize: '11px',
+                                fontWeight: '700',
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '4px'
+                              }}>
+                                {formatConfig.icon} {formatConfig.label}
+                              </span>
+                            </td>
+                            <td 
+                              style={{ padding: '12px 16px', fontWeight: '600', wordBreak: 'break-all' }}
+                              onClick={() => handleOpenExportFile(file)}
+                              className="export-file-title"
+                            >
+                              {file.name}
+                            </td>
+                            <td style={{ padding: '12px 16px', color: 'var(--clr-text-muted)' }}>
+                              {formattedSize}
+                            </td>
+                            <td style={{ padding: '12px 16px', color: 'var(--clr-text-muted)' }}>
+                              {formattedDate}
+                            </td>
+                            <td style={{ padding: '12px 16px', textAlign: 'right' }}>
+                              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                                <button
+                                  type="button"
+                                  className="btn btn-secondary"
+                                  onClick={() => handleOpenExportFile(file)}
+                                  style={{ padding: '4px 10px', fontSize: '11px', height: 'auto' }}
+                                >
+                                  ▶ {t.exportsOpen || '開く'}
+                                </button>
+                                {window.electron && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary"
+                                    onClick={() => handleShowExportInFolder(file)}
+                                    style={{ padding: '4px 10px', fontSize: '11px', height: 'auto' }}
+                                    title="エクスプローラーで選択"
+                                  >
+                                    📁
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  className="btn btn-delete"
+                                  onClick={() => handleDeleteExportFile(file.name)}
+                                  style={{ padding: '4px 10px', fontSize: '11px', height: 'auto', background: 'rgba(239, 68, 68, 0.1)', color: '#f87171', border: '1px solid rgba(239, 68, 68, 0.15)' }}
+                                >
+                                  🗑️ {t.exportsDelete || '削除'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
           ) : (
             <div className="settings-section glass-panel" style={{ padding: '24px', borderRadius: 'var(--radius-lg)' }}>

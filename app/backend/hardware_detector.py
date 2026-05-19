@@ -104,21 +104,21 @@ def detect_hardware() -> dict:
             device = "cuda"
             model_name = "large-v3"
             compute_type = "float16"
-            chunk_seconds = 300           # 5 min
+            chunk_seconds = 0
             threads = min(cpu_cores, 8)
         elif gpu_vram_gb >= 4:
             tier = "medium"
             device = "cuda"
             model_name = "medium"
             compute_type = "float16"
-            chunk_seconds = 180           # 3 min
+            chunk_seconds = 0
             threads = min(cpu_cores, 4)
         else:
             tier = "light"
             device = "cuda"
             model_name = "small"
             compute_type = "float16"
-            chunk_seconds = 120           # 2 min
+            chunk_seconds = 0
             threads = min(cpu_cores, 2)
     elif gpu_type == "apple_silicon":
         # Apple Silicon unified memory
@@ -127,14 +127,14 @@ def detect_hardware() -> dict:
             device = "coreml"
             model_name = "large-v3"
             compute_type = "float16"
-            chunk_seconds = 300
+            chunk_seconds = 0
             threads = min(cpu_cores, 8)
         else:
             tier = "medium"
             device = "coreml"
             model_name = "small"
             compute_type = "float16"
-            chunk_seconds = 180
+            chunk_seconds = 0
             threads = min(cpu_cores, 4)
     elif gpu_type == "amd_intel":
         # AMD / Intel GPU running on Vulkan
@@ -143,14 +143,14 @@ def detect_hardware() -> dict:
             device = "vulkan"
             model_name = "large-v3"
             compute_type = "float16"
-            chunk_seconds = 300
+            chunk_seconds = 0
             threads = min(cpu_cores, 8)
         else:
             tier = "medium"
             device = "vulkan"
             model_name = "small"
             compute_type = "float16"
-            chunk_seconds = 180
+            chunk_seconds = 0
             threads = min(cpu_cores, 4)
     else:
         # CPU-only fallback
@@ -160,13 +160,13 @@ def detect_hardware() -> dict:
             tier = "medium"
             model_name = "base"
             compute_type = "int8"
-            chunk_seconds = 180           # 3 min
+            chunk_seconds = 0
             threads = min(cpu_cores, 4)
         else:
             tier = "light"
             model_name = "small"
             compute_type = "int8"
-            chunk_seconds = 120           # 2 min
+            chunk_seconds = 0
             threads = min(cpu_cores, 2)
 
     profile = {

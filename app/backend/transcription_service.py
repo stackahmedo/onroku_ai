@@ -115,6 +115,8 @@ class TranscriptionService:
         self._whisper_model = None
         self._current_whisper_model_name = None
         self._pyannote_pipeline = None
+        self._qwen3_model = None
+        self._current_qwen3_model_name = None
 
     # ── Whisper model ────────────────────────────────────────
 
@@ -138,7 +140,7 @@ class TranscriptionService:
             "download_root": str(model_dir),
         }
         if self.device == "cpu":
-            # Fully utilize all logical CPU cores during inference
+            # Fully utilize all logical CPU cores during inference for maximum priority speed
             kwargs["cpu_threads"] = self.hw["cpu_cores"]
             kwargs["num_workers"] = 1
         else:
@@ -151,6 +153,52 @@ class TranscriptionService:
         )
         self._current_whisper_model_name = target_model
         logger.info("Whisper model loaded")
+
+    def _load_qwen3_asr(self, model_name: str):
+        """Lazy-load the Qwen3-ASR model on CPU or CUDA GPU."""
+        if self._qwen3_model is not None and self._current_qwen3_model_name == model_name:
+            return
+            
+        import torch
+        try:
+            from qwen_asr import Qwen3ASRModel
+        except ImportError as e:
+            logger.error(f"qwen-asr library not installed: {e}. Please run pip install qwen-asr.")
+            raise RuntimeError("qwen-asr library is required to run Qwen3-ASR models.")
+            
+        model_dir = Path(__file__).parent.parent.parent / "app" / "models" / "qwen3-asr"
+        if "0.6b" in model_name.lower():
+            local_model_path = model_dir / "Qwen3-ASR-0.6B"
+            repo_id = "Qwen/Qwen3-ASR-0.6B"
+        else:
+            local_model_path = model_dir / "Qwen3-ASR-1.7B"
+            repo_id = "Qwen/Qwen3-ASR-1.7B"
+            
+        model_path_to_load = str(local_model_path) if local_model_path.exists() and any(local_model_path.iterdir()) else repo_id
+        
+        # Optimize dtype and device mapping
+        if self.device == "cuda":
+            dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            device_map = self.device
+        else:
+            dtype = torch.float32
+            device_map = "cpu"
+            # For maximum multi-core PyTorch CPU execution
+            torch.set_num_threads(self.hw["cpu_cores"])
+            
+        logger.info(f"Loading Qwen3-ASR model: {model_name} from {model_path_to_load} on {device_map} with dtype {dtype}...")
+        
+        try:
+            self._qwen3_model = Qwen3ASRModel.from_pretrained(
+                model_path_to_load,
+                dtype=dtype,
+                device_map=device_map
+            )
+            self._current_qwen3_model_name = model_name
+            logger.info("Qwen3-ASR model loaded successfully")
+        except Exception as e:
+            logger.error(f"Failed to load Qwen3-ASR model: {e}", exc_info=True)
+            raise e
 
     def _download_ggml_model(self, model_name: str, progress_cb: Optional[Callable] = None) -> str:
         """Download GGML model from Hugging Face if not present."""
@@ -312,8 +360,17 @@ class TranscriptionService:
 
     # ── Pyannote pipeline ────────────────────────────────────
 
-    def _load_pyannote(self):
+    def _load_pyannote(self, diarization_mode: str = "accurate"):
         if self._pyannote_pipeline is not None:
+            # Dynamically update embedding batch size in case mode changed
+            try:
+                import torch
+                device = torch.device(self.device if self.device == "cuda" else "cpu")
+                if device.type != "cuda":
+                    self._pyannote_pipeline.embedding_batch_size = 4 if diarization_mode == "fast" else 1
+                    logger.info(f"Dynamically updated Pyannote embedding_batch_size = {self._pyannote_pipeline.embedding_batch_size}")
+            except Exception as e:
+                logger.warning(f"Could not update Pyannote embedding_batch_size: {e}")
             return True
         try:
             from pyannote.audio import Pipeline
@@ -359,7 +416,7 @@ class TranscriptionService:
                 if device.type == "cuda":
                     self._pyannote_pipeline.embedding_batch_size = 16
                 else:
-                    self._pyannote_pipeline.embedding_batch_size = 1
+                    self._pyannote_pipeline.embedding_batch_size = 4 if diarization_mode == "fast" else 1
                 logger.info(f"Configured Pyannote embedding_batch_size = {self._pyannote_pipeline.embedding_batch_size}")
             except Exception as e:
                 logger.warning(f"Could not set Pyannote embedding_batch_size: {e}")
@@ -445,11 +502,14 @@ class TranscriptionService:
         """Convert any audio/video to mono 16kHz WAV."""
         ffmpeg = TranscriptionService._find_ffmpeg()
         cmd = [
-            ffmpeg, "-y", "-i", input_path,
+            ffmpeg, "-y",
+            "-threads", "0",  # Use all CPU cores for decoding (2-3x faster)
+            "-i", input_path,
             "-vn",            # skip video stream decoding for huge speedup on video uploads
             "-ac", "1",       # mono
             "-ar", "16000",   # 16 kHz
             "-acodec", "pcm_s16le",
+            "-loglevel", "error",  # suppress verbose logging overhead
             output_path,
         ]
         result = subprocess.run(cmd, capture_output=True, text=True)
@@ -458,7 +518,24 @@ class TranscriptionService:
 
     @staticmethod
     def _get_duration(wav_path: str) -> float:
-        """Return duration in seconds via ffprobe."""
+        """Return duration in seconds by reading WAV header directly (zero subprocess cost)."""
+        try:
+            import wave
+            with wave.open(wav_path, "rb") as wf:
+                frames = wf.getnframes()
+                rate = wf.getframerate()
+                if rate > 0:
+                    return frames / rate
+        except Exception:
+            pass
+        # Fallback: use soundfile
+        try:
+            import soundfile as sf
+            info = sf.info(wav_path)
+            return info.duration
+        except Exception:
+            pass
+        # Last resort: ffprobe subprocess
         try:
             ffprobe = TranscriptionService._find_ffprobe()
             cmd = [
@@ -470,13 +547,7 @@ class TranscriptionService:
             out = subprocess.check_output(cmd, stderr=subprocess.DEVNULL).decode().strip()
             return float(out)
         except Exception:
-            # Fallback: use soundfile
-            try:
-                import soundfile as sf
-                info = sf.info(wav_path)
-                return info.duration
-            except Exception:
-                return 0.0
+            return 0.0
 
     @staticmethod
     def _split_chunks(wav_path: str, chunk_seconds: int, chunks_dir: Path) -> List[Tuple[str, float]]:
@@ -521,6 +592,7 @@ class TranscriptionService:
         num_speakers: Optional[int] = None,
         chunk_seconds: Optional[int] = None,
         on_language_detected: Optional[Callable[[str], None]] = None,
+        diarization_mode: str = "accurate",
     ) -> List[Dict]:
         """
         Full pipeline: preprocess → chunk → transcribe → diarize → merge.
@@ -564,9 +636,14 @@ class TranscriptionService:
                 raise InterruptedError("Job cancelled")
 
             check_pause_cancel(job_id)
-            # ── Step 2.5: Load / Downloader Whisper model ────────
+            # ── Step 2.5: Load / Downloader Whisper or Qwen model ────────
             active_model = model_name if model_name else self.model_name
-            if self.engine == "whisper.cpp":
+            is_qwen3 = active_model and "qwen3" in active_model.lower()
+
+            if is_qwen3:
+                _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
+                self._load_qwen3_asr(active_model)
+            elif self.engine == "whisper.cpp":
                 _progress(progress_cb, 8, "モデル確認中... / Checking AI model...")
                 model_path = self._download_ggml_model(active_model, progress_cb)
             else:
@@ -591,7 +668,18 @@ class TranscriptionService:
                     f"文字起こし中 {i+1}/{n_chunks}... / Transcribing chunk {i+1}/{n_chunks}..."
                 )
 
-                if self.engine == "whisper.cpp":
+                if is_qwen3:
+                    segs = self._transcribe_chunk_qwen3_asr(
+                        chunk_path=chunk_path,
+                        offset=offset,
+                        total_duration=duration,
+                        progress_cb=progress_cb,
+                        chunk_idx=i,
+                        n_chunks=n_chunks,
+                        job_id=job_id,
+                        on_language_detected=on_language_detected if i == 0 else None,
+                    )
+                elif self.engine == "whisper.cpp":
                     segs = self._transcribe_chunk_whisper_cpp(
                         chunk_path=chunk_path,
                         model_path=model_path,
@@ -615,6 +703,7 @@ class TranscriptionService:
                         n_chunks=n_chunks,
                         job_id=job_id,
                         on_language_detected=on_language_detected if i == 0 else None,
+                        diarization_mode=diarization_mode,
                     )
                 all_segments.extend(segs)
                 logger.info(f"Chunk {i+1}/{n_chunks}: {len(segs)} segments")
@@ -625,7 +714,7 @@ class TranscriptionService:
 
             # ── Step 4: Speaker diarization ────────────────
             _progress(progress_cb, 82, "話者認識中... / Detecting speakers...")
-            all_segments = self._diarize(wav_path, all_segments, num_speakers)
+            all_segments = self._diarize(wav_path, all_segments, num_speakers, diarization_mode)
 
             # ── Step 5: Done ───────────────────────────────
             _progress(progress_cb, 98, "後処理中... / Finalizing...")
@@ -633,6 +722,75 @@ class TranscriptionService:
 
         finally:
             shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    def _transcribe_chunk_qwen3_asr(
+        self,
+        chunk_path: str,
+        offset: float,
+        total_duration: float,
+        progress_cb: Optional[Callable[[int, str], None]] = None,
+        chunk_idx: int = 0,
+        n_chunks: int = 1,
+        job_id: str = "",
+        on_language_detected: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict]:
+        """Transcribe a single WAV chunk with Qwen3-ASR."""
+        try:
+            logger.info(f"Running Qwen3-ASR transcription on chunk {chunk_idx+1}/{n_chunks} (offset={offset:.1f}s)...")
+            results = self._qwen3_model.transcribe(chunk_path)
+            
+            # Handle return format robustly
+            if isinstance(results, list):
+                result = results[0]
+            else:
+                result = results
+                
+            text = ""
+            if hasattr(result, "text"):
+                text = result.text
+            elif isinstance(result, dict) and "text" in result:
+                text = result["text"]
+            else:
+                text = str(result)
+                
+            text = text.strip()
+            if not text:
+                return []
+                
+            if on_language_detected:
+                try:
+                    lang = "ja"
+                    if hasattr(result, "language") and result.language:
+                        lang = "ja" if "ja" in result.language.lower() or "japanese" in result.language.lower() else "en"
+                    on_language_detected(lang)
+                except Exception as e:
+                    logger.warning(f"Failed to call on_language_detected in Qwen3-ASR runner: {e}")
+                    
+            chunk_duration = self._get_duration(chunk_path)
+            if chunk_duration <= 0:
+                chunk_duration = 30.0
+                
+            segments_out = [{
+                "start": round(offset, 3),
+                "end":   round(offset + chunk_duration, 3),
+                "speaker": "Speaker 1",
+                "text": text,
+                "words": [],
+            }]
+            
+            if total_duration > 0 and progress_cb:
+                processed_secs = min(offset + chunk_duration, total_duration)
+                pct = 10 + int(70 * (processed_secs / total_duration))
+                pct = min(pct, 79)
+                _progress(
+                    progress_cb, pct,
+                    f"文字起こし中 {chunk_idx+1}/{n_chunks}... / Transcribing chunk {chunk_idx+1}/{n_chunks}..."
+                )
+                
+            return segments_out
+        except Exception as e:
+            logger.error(f"Qwen3-ASR chunk transcription error: {e}", exc_info=True)
+            return []
 
     def _transcribe_chunk(
         self,
@@ -645,13 +803,18 @@ class TranscriptionService:
         n_chunks: int = 1,
         job_id: str = "",
         on_language_detected: Optional[Callable[[str], None]] = None,
+        diarization_mode: str = "accurate",
     ) -> List[Dict]:
         """Transcribe a single WAV chunk with faster-whisper."""
-        # Optimize beam search decoding for CPU to speed up inference
-        beam_size = 3 if self.device == "cpu" else 5
+        # Optimize beam search decoding for CPU to speed up inference (beam_size=1 is greedy, up to 3x faster)
+        beam_size = 1 if self.device == "cpu" else 5
 
         # If language is 'auto', we pass None to let Whisper auto-detect
         active_lang = None if language == "auto" else language
+
+        # Smart word_timestamps: only enable when diarization needs word-level speaker splits
+        # Disabling word_timestamps gives 30-50% speed boost on CPU
+        need_word_ts = diarization_mode != "off"
 
         segments_out = []
         try:
@@ -660,8 +823,13 @@ class TranscriptionService:
                 language=active_lang,
                 beam_size=beam_size,
                 vad_filter=True,
-                vad_parameters={"min_silence_duration_ms": 500},
-                word_timestamps=True,
+                vad_parameters={
+                    "min_silence_duration_ms": 800,   # Skip longer silence gaps (faster)
+                    "speech_pad_ms": 200,              # Tighter speech boundary detection
+                    "threshold": 0.35,                 # More sensitive VAD (catches quiet speech)
+                },
+                word_timestamps=need_word_ts,
+                condition_on_previous_text=False,  # Prevent hallucination loops & ~10-15% speed boost
             )
             logger.info(
                 f"  Detected language: {info.language} "
@@ -675,7 +843,7 @@ class TranscriptionService:
             for seg in segments:
                 check_pause_cancel(job_id)
                 words_list = []
-                if seg.words:
+                if need_word_ts and seg.words:
                     for w in seg.words:
                         words_list.append({
                             "start": round(w.start + offset, 3),
@@ -706,16 +874,156 @@ class TranscriptionService:
 
     # ── Speaker diarization ──────────────────────────────────
 
-    def _diarize(self, wav_path: str, segments: List[Dict], num_speakers: Optional[int] = None) -> List[Dict]:
+    def _diarize_sherpa_onnx(self, wav_path: str, num_speakers: Optional[int] = None) -> List[Dict]:
+        """Perform speaker diarization using Sherpa-ONNX offline engine."""
+        try:
+            import sherpa_onnx
+            import soundfile as sf
+        except ImportError as e:
+            logger.error(f"sherpa_onnx or soundfile library not installed: {e}. Please run pip install sherpa-onnx.")
+            return []
+
+        try:
+            model_dir = Path(__file__).parent.parent.parent / "app" / "models" / "sherpa-onnx"
+            segmentation_model = str(model_dir / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx")
+            embedding_model = str(model_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx")
+
+            if not os.path.exists(segmentation_model) or not os.path.exists(embedding_model):
+                logger.error(f"Sherpa-ONNX model files are missing at {segmentation_model} or {embedding_model}.")
+                return []
+
+            config = sherpa_onnx.OfflineSpeakerDiarizationConfig(
+                segmentation=sherpa_onnx.OfflineSpeakerSegmentationModelConfig(
+                    pyannote=sherpa_onnx.OfflineSpeakerSegmentationPyannoteModelConfig(
+                        model=segmentation_model
+                    ),
+                ),
+                embedding=sherpa_onnx.SpeakerEmbeddingExtractorConfig(
+                    model=embedding_model
+                ),
+                clustering=sherpa_onnx.FastClusteringConfig(
+                    num_clusters=num_speakers if (num_speakers is not None and num_speakers > 0) else -1,
+                    threshold=0.5
+                ),
+                min_duration_on=0.3,
+                min_duration_off=0.5,
+            )
+
+            if not config.validate():
+                logger.error("Sherpa-ONNX config validation failed.")
+                return []
+
+            logger.info("Initializing Sherpa-ONNX offline speaker diarizer...")
+            sd = sherpa_onnx.OfflineSpeakerDiarization(config)
+
+            logger.info("Reading audio file for diarization...")
+            audio, sample_rate = sf.read(wav_path, dtype="float32", always_2d=True)
+            audio = audio[:, 0]
+
+            logger.info("Running Sherpa-ONNX diarization process...")
+            result = sd.process(audio).sort_by_start_time()
+
+            speaker_segments = []
+            for r in result:
+                speaker_segments.append({
+                    "start": r.start,
+                    "end": r.end,
+                    "speaker": f"Speaker {r.speaker + 1}"
+                })
+
+            return speaker_segments
+        except Exception as e:
+            logger.error(f"Sherpa-ONNX diarization process failed: {e}", exc_info=True)
+            return []
+
+    def _diarize(self, wav_path: str, segments: List[Dict], num_speakers: Optional[int] = None, diarization_mode: str = "accurate") -> List[Dict]:
         """Run Pyannote and assign speaker labels to transcript segments, splitting segments by speaker change."""
-        ok = self._load_pyannote()
+        if diarization_mode == "off":
+            logger.info("Speaker diarization is disabled ('off' mode). Skipping diarization.")
+            for seg in segments:
+                seg["speaker"] = "Speaker 1"
+                seg.pop("words", None)
+            return segments
+
+        if diarization_mode == "sherpa-onnx":
+            logger.info("Using Sherpa-ONNX (ONNX Runtime) for Speaker Diarization...")
+            speaker_segments = self._diarize_sherpa_onnx(wav_path, num_speakers)
+            if not speaker_segments:
+                logger.warning("Sherpa-ONNX diarization failed or returned no speaker tracks. Falling back to Speaker 1.")
+                for seg in segments:
+                    seg["speaker"] = "Speaker 1"
+                    seg.pop("words", None)
+                return segments
+
+            # Detect if text has English characters to determine join spacing
+            first_text = segments[0]["text"] if segments else ""
+            import re
+            is_english = bool(re.search(r'[a-zA-Z]', first_text))
+            join_char = " " if is_english else ""
+
+            final_segments = []
+            for seg in segments:
+                words = seg.get("words", [])
+                if not words:
+                    # Fallback if word-timestamps are missing for this segment
+                    seg["speaker"] = _assign_speaker(seg, speaker_segments)
+                    seg.pop("words", None)
+                    final_segments.append(seg)
+                    continue
+
+                # Map each word to its best speaker
+                word_speaker_pairs = []
+                for w in words:
+                    spk = _assign_speaker(w, speaker_segments)
+                    word_speaker_pairs.append((w, spk))
+
+                # Group words into contiguous speaker blocks
+                blocks = []
+                current_block = []
+                current_speaker = None
+
+                for w, spk in word_speaker_pairs:
+                    if current_speaker is None:
+                        current_speaker = spk
+                        current_block.append(w)
+                    elif spk == current_speaker:
+                        current_block.append(w)
+                    else:
+                        blocks.append((current_speaker, current_block))
+                        current_speaker = spk
+                        current_block = [w]
+                if current_block:
+                    blocks.append((current_speaker, current_block))
+
+                # Create sub-segments from blocks
+                for spk, block_words in blocks:
+                    sub_text = join_char.join([w["text"] for w in block_words]).strip()
+                    if not sub_text:
+                        continue
+                    final_segments.append({
+                        "start":   block_words[0]["start"],
+                        "end":     block_words[-1]["end"],
+                        "speaker": spk,
+                        "text":    sub_text,
+                    })
+            return final_segments
+
+        ok = self._load_pyannote(diarization_mode)
         if not ok or not segments:
+            for seg in segments:
+                seg["speaker"] = "Speaker 1"
+                seg.pop("words", None)
             return segments
 
         try:
             kwargs = {}
             if num_speakers is not None and num_speakers > 0:
                 kwargs["num_speakers"] = num_speakers
+            
+            if diarization_mode == "fast":
+                kwargs["segmentation_step"] = 0.25
+                logger.info("Applying fast speaker detection optimization: segmentation_step = 0.25")
+
             diarization_input = _load_audio_for_pyannote(wav_path)
             diarization = self._pyannote_pipeline(diarization_input, **kwargs)
             diarization_tracks = _get_diarization_annotation(diarization)

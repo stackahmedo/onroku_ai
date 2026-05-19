@@ -127,6 +127,105 @@ def setup_pyannote():
         return False
 
 
+def setup_sherpa_onnx():
+    banner("Setting up Sherpa-ONNX speaker diarization models")
+    sherpa_dir = MODELS_DIR / "sherpa-onnx"
+    sherpa_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Download pyannote-segmentation-3-0
+    seg_zip_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-segmentation-models/sherpa-onnx-pyannote-segmentation-3-0.tar.bz2"
+    seg_dir = sherpa_dir / "sherpa-onnx-pyannote-segmentation-3-0"
+    seg_model_file = seg_dir / "model.onnx"
+
+    import requests
+    import shutil
+    import tarfile
+
+    if not seg_model_file.exists():
+        print("  Downloading Pyannote Segmentation 3.0 model for Sherpa-ONNX...")
+        zip_path = sherpa_dir / "segmentation.tar.bz2"
+        try:
+            response = requests.get(seg_zip_url, stream=True)
+            if response.status_code == 200:
+                with open(zip_path, "wb") as f:
+                    shutil.copyfileobj(response.raw, f)
+                print("  Extracting segmentation model archive...")
+                with tarfile.open(zip_path, "r:bz2") as tar:
+                    tar.extractall(path=str(sherpa_dir))
+                if zip_path.exists():
+                    zip_path.unlink()
+                print("  ✅ Segmentation model extraction complete")
+            else:
+                print(f"  ❌ Failed to download segmentation model: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"  ❌ Segmentation model download/extract failed: {e}")
+    else:
+        print("  ✅ Pyannote Segmentation 3.0 model already present")
+
+    # 2. Download 3D-Speaker embedding extractor
+    embed_url = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+    embed_file = sherpa_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+
+    if not embed_file.exists():
+        print("  Downloading 3D-Speaker embedding extractor model...")
+        try:
+            response = requests.get(embed_url, stream=True)
+            if response.status_code == 200:
+                with open(embed_file, "wb") as f:
+                    shutil.copyfileobj(response.raw, f)
+                print("  ✅ 3D-Speaker embedding model ready")
+            else:
+                print(f"  ❌ Failed to download embedding model: HTTP {response.status_code}")
+        except Exception as e:
+            print(f"  ❌ Embedding model download failed: {e}")
+    else:
+        print("  ✅ 3D-Speaker embedding model already present")
+
+
+def setup_qwen3_asr():
+    banner("Setting up Qwen3-ASR speaker recognition / speech-to-text models")
+    qwen_dir = MODELS_DIR / "qwen3-asr"
+    qwen_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        from huggingface_hub import snapshot_download
+    except ImportError:
+        print("  ❌ huggingface_hub library is not installed.")
+        return False
+        
+    models = {
+        "Qwen/Qwen3-ASR-0.6B": qwen_dir / "Qwen3-ASR-0.6B",
+        "Qwen/Qwen3-ASR-1.7B": qwen_dir / "Qwen3-ASR-1.7B",
+    }
+    
+    # Check if HuggingFace token exists for authentication
+    hf_token = None
+    if TOKEN_FILE.exists():
+        hf_token = TOKEN_FILE.read_text().strip()
+        
+    for repo_id, local_dir in models.items():
+        if local_dir.exists() and any(local_dir.iterdir()):
+            print(f"  ✅ {repo_id} already downloaded at {local_dir}")
+            continue
+            
+        print(f"  Downloading {repo_id} to local cache {local_dir}...")
+        print("  (This may take several minutes depending on your internet connection...)")
+        
+        try:
+            snapshot_download(
+                repo_id=repo_id,
+                local_dir=str(local_dir),
+                token=hf_token,
+                ignore_patterns=["*.msgpack", "*.h5", "*.ot"], # save disk space by skipping unused weights
+            )
+            print(f"  ✅ Successfully downloaded {repo_id}")
+        except Exception as e:
+            print(f"  ❌ Failed to download {repo_id}: {e}")
+            print("  You can still run other models or re-run setup later.")
+            
+    return True
+
+
 def create_storage_dirs():
     banner("Creating storage directories")
     dirs = [
@@ -177,6 +276,8 @@ def main():
     create_storage_dirs()
     download_whisper(hw.get("model_name", "small"))
     setup_pyannote()
+    setup_sherpa_onnx()
+    setup_qwen3_asr()
 
     print("\n" + "=" * 60)
     print("  ✅ Setup complete!")

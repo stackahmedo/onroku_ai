@@ -1636,3 +1636,19 @@ select option {
   background: #f43f5e !important;
   color: #ffffff !important;
 }
+
+/* ── Exported Document Manager UI ────────────────── */
+.exports-row:hover {
+  background: rgba(255, 255, 255, 0.025) !important;
+}
+
+.export-file-title {
+  color: var(--clr-text);
+  transition: color 0.2s ease;
+}
+
+.export-file-title:hover {
+  color: var(--clr-primary, #6366f1) !important;
+  text-decoration: underline;
+}
+

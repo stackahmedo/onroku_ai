@@ -19,3 +19,22 @@
 2026-05-19 09:58:38,692 [INFO] faster_whisper: Detected language 'ja' with probability 1.00
 2026-05-19 09:58:38,696 [INFO] transcription_service:   Detected language: ja (prob=1.00)
 2026-05-19 09:58:38,705 [INFO] main: Auto-detected language for job f8a12c48-2f19-4639-bbe1-4fce80ca5f2e: ja
+2026-05-19 10:06:56,082 [INFO] transcription_service: Chunk 1/2: 38 segments
+2026-05-19 10:06:56,231 [INFO] faster_whisper: Processing audio with duration 04:45.390
+2026-05-19 10:06:56,852 [INFO] faster_whisper: VAD filter removed 00:56.110 of audio
+2026-05-19 10:07:05,857 [INFO] faster_whisper: Detected language 'ja' with probability 1.00
+2026-05-19 10:07:05,860 [INFO] transcription_service:   Detected language: ja (prob=1.00)
+2026-05-19 10:16:02,185 [INFO] transcription_service: Chunk 2/2: 36 segments
+2026-05-19 10:16:07,058 [INFO] transcription_service: Loaded Hugging Face token from: hf_token.txt
+2026-05-19 10:16:07,058 [INFO] transcription_service: Loading Pyannote speaker diarization pipeline...
+2026-05-19 10:16:07,757 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-3.1/resolve/main/config.yaml "HTTP/1.1 200 OK"
+2026-05-19 10:16:08,841 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/segmentation-3.0/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
+2026-05-19 10:16:09,457 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/xvec_transform.npz "HTTP/1.1 302 Found"
+2026-05-19 10:16:09,671 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/speaker-diarization-community-1/resolve/main/plda/plda.npz "HTTP/1.1 302 Found"
+2026-05-19 10:16:09,945 [INFO] httpx: HTTP Request: HEAD https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/resolve/main/pytorch_model.bin "HTTP/1.1 302 Found"
+2026-05-19 10:16:10,058 [INFO] transcription_service: Configured Pyannote embedding_batch_size = 1
+2026-05-19 10:16:10,059 [INFO] transcription_service: Pyannote pipeline loaded
+2026-05-19 10:21:13,400 [INFO] transcription_service: Diarization produced 193 speaker turn(s), 3 unique speaker(s).
+2026-05-19 10:21:13,461 [INFO] transcription_service: Diarization complete. Aligned and split into 76 segments.
+2026-05-19 10:21:13,503 [INFO] main: Transcription done: f8a12c48-2f19-4639-bbe1-4fce80ca5f2e (76 segments)
+2026-05-19 10:51:45,455 [INFO] export_service: TXT exported: C:\TestTranscripts\export_a47206f5-c320-4e12-bed1-efb7278a500c_transcript.txt

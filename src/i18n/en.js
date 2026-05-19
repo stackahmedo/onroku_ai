@@ -92,6 +92,19 @@ const en = {
   txtConvBtnConvert: "Compile & Export Compact PDF",
   txtConvSuccess: "PDF compiled successfully!",
   txtConvError: "PDF compilation failed. Please verify your format.",
+  diarizationMode: "Speaker Detection",
+  diarizationModeEnabled: "Enabled (Detect Speakers)",
+  diarizationModeDisabled: "Disabled (Single Speaker)",
+  modelQwen3Asr06b: "Qwen3-ASR 0.6B (Ultra-Fast/Low Latency)",
+  modelQwen3Asr17b: "Qwen3-ASR 1.7B (SOTA Accuracy)",
+  tabExports: "Exported Files",
+  exportsTitle: "Exported Document Manager",
+  exportsSubtitle: "View and manage previously exported sheets, logs, and PDF files directly from your workspace.",
+  exportsEmpty: "No exported files found. Please run an export from your transcription history cards first.",
+  exportsOpen: "Open",
+  exportsShowFolder: "Open Folder",
+  exportsDelete: "Delete",
+  exportsConfirmDelete: "Are you sure you want to permanently delete this file?",
 };
 
 export default en;

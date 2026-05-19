@@ -210,6 +210,7 @@ async def upload_audio(
     model: str = Query(default="auto"),
     speaker_count: int | None = Query(default=None),
     chunk_seconds: int | None = Query(default=None),
+    diarization_mode: str = Query(default="accurate"),
 ):
     try:
         file_id = str(uuid.uuid4())
@@ -239,7 +240,7 @@ async def upload_audio(
         )
 
         _PROGRESS[job_id] = {"pct": 0, "label": "待機中... / Waiting..."}
-        background_tasks.add_task(_run_transcription, job_id, str(upload_path), language, actual_model_name, speaker_count, chunk_seconds)
+        background_tasks.add_task(_run_transcription, job_id, str(upload_path), language, actual_model_name, speaker_count, chunk_seconds, diarization_mode)
 
         logger.info(f"Uploaded: {file.filename} → job {job_id} with model {actual_model_name} (Size: {file_size_bytes} bytes)")
         return {
@@ -257,7 +258,7 @@ async def upload_audio(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-def _run_transcription(job_id: str, file_path: str, language: str, model_name: str, speaker_count: int | None = None, chunk_seconds: int | None = None):
+def _run_transcription(job_id: str, file_path: str, language: str, model_name: str, speaker_count: int | None = None, chunk_seconds: int | None = None, diarization_mode: str = "accurate"):
     """Background task: run full transcription pipeline."""
     import time
     last_db_pct = -1
@@ -308,6 +309,7 @@ def _run_transcription(job_id: str, file_path: str, language: str, model_name: s
             num_speakers=speaker_count,
             chunk_seconds=chunk_seconds,
             on_language_detected=_lang_cb,
+            diarization_mode=diarization_mode,
         )
 
         # Save JSON transcript
@@ -378,21 +380,53 @@ async def list_jobs(skip: int = 0, limit: int = 20):
 @app.get("/progress/{job_id}")
 async def progress_stream(job_id: str):
     """Server-Sent Events stream for real-time progress."""
-    async def generator():
-        while True:
-            job = db_service.get_job(job_id)
-            if not job:
-                yield {"event": "error", "data": json.dumps({"error": "not found"})}
-                break
+    # Cache job metadata once at stream open (avoids repeated DB reads for static fields)
+    _cached_job = db_service.get_job(job_id)
+    _cached_duration = _cached_job.get("duration_seconds") if _cached_job else None
+    _cached_file_size = _cached_job.get("file_size_bytes", 0) if _cached_job else 0
 
-            # Maintain persistent in-memory elapsed timer to halt counting when paused
+    async def generator():
+        nonlocal _cached_duration, _cached_file_size
+        _db_check_counter = 0  # Only query DB every 5 ticks (5 seconds) during active transcription
+
+        while True:
             prog = _PROGRESS.get(job_id)
+
+            # Determine job status: use in-memory progress as primary source during active work
+            # Only query SQLite every 5 seconds to check for terminal status transitions
+            _db_check_counter += 1
+            if not prog or _db_check_counter >= 5:
+                _db_check_counter = 0
+                job = db_service.get_job(job_id)
+                if not job:
+                    yield {"event": "error", "data": json.dumps({"error": "not found"})}
+                    break
+                job_status = job["status"]
+                # Refresh cached metadata if it became available
+                if job.get("duration_seconds"):
+                    _cached_duration = job["duration_seconds"]
+                if job.get("file_size_bytes") and job["file_size_bytes"] > 0:
+                    _cached_file_size = job["file_size_bytes"]
+            else:
+                # Infer status from in-memory progress (no DB hit)
+                pct_val = prog.get("pct", 0)
+                if pct_val >= 100:
+                    job_status = "completed"
+                elif "キャンセル" in prog.get("label", "") or "Cancel" in prog.get("label", ""):
+                    job_status = "cancelled"
+                elif "エラー" in prog.get("label", "") or "Error" in prog.get("label", ""):
+                    job_status = "failed"
+                elif "一時停止" in prog.get("label", "") or "Paused" in prog.get("label", ""):
+                    job_status = "paused"
+                else:
+                    job_status = "transcribing"
+
             if not prog:
                 prog = {
-                    "pct": job.get("progress_pct", 0),
-                    "label": job.get("progress_label", ""),
+                    "pct": 0,
+                    "label": "",
                     "elapsed": 0,
-                    "last_tick": None
+                    "last_tick": None,
                 }
                 _PROGRESS[job_id] = prog
 
@@ -402,48 +436,33 @@ async def progress_stream(job_id: str):
                 prog["last_tick"] = None
 
             now_time = datetime.now()
-            if job["status"] in ("transcribing", "pending"):
+            if job_status in ("transcribing", "pending"):
                 if prog["last_tick"]:
                     delta = int((now_time - prog["last_tick"]).total_seconds())
                     if delta > 0:
                         prog["elapsed"] += delta
                         prog["last_tick"] = now_time
                 else:
-                    try:
-                        created_at = datetime.fromisoformat(job["created_at"])
-                        prog["elapsed"] = int((now_time - created_at).total_seconds())
-                    except:
-                        prog["elapsed"] = 0
+                    prog["elapsed"] = 0
                     prog["last_tick"] = now_time
-            elif job["status"] == "paused":
+            elif job_status == "paused":
                 prog["last_tick"] = now_time
             else:
                 prog["last_tick"] = None
 
             elapsed = prog["elapsed"]
 
-            # Self-heal missing file size in progress stream
-            if (not job.get("file_size_bytes") or job.get("file_size_bytes") == 0) and job.get("file_path"):
-                try:
-                    import os
-                    p = os.path.getsize(job["file_path"])
-                    if p > 0:
-                        job["file_size_bytes"] = p
-                        db_service.update_job_size(job_id, p)
-                except:
-                    pass
-
             data = {
-                "pct":              prog["pct"],
-                "label":            prog["label"],
-                "status":           job["status"],
-                "duration_seconds": job.get("duration_seconds"),
-                "file_size_bytes":  job.get("file_size_bytes"),
+                "pct":              prog.get("pct", 0),
+                "label":            prog.get("label", ""),
+                "status":           job_status,
+                "duration_seconds": _cached_duration,
+                "file_size_bytes":  _cached_file_size,
                 "elapsed_seconds":  elapsed,
             }
             yield {"event": "progress", "data": json.dumps(data)}
 
-            if job["status"] in ("completed", "failed", "cancelled"):
+            if job_status in ("completed", "failed", "cancelled"):
                 yield {"event": "done", "data": json.dumps(data)}
                 break
 
@@ -764,6 +783,105 @@ async def convert_txt_to_pdf(payload: dict):
     except Exception as e:
         logger.error(f"Error in convert_txt_to_pdf: {e}")
         shutil.rmtree(temp_dir, ignore_errors=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def get_export_dir() -> Path:
+    try:
+        settings = load_settings()
+        custom_dir = settings.get("transcript_export_dir")
+        if custom_dir:
+            path = Path(custom_dir)
+            if path.exists():
+                return path
+    except Exception as e:
+        logger.warning(f"Error reading custom export dir: {e}")
+    return EXPORT_DIR
+
+
+@app.get("/exports")
+async def list_exported_files():
+    try:
+        target_dir = get_export_dir()
+        if not target_dir.exists():
+            return {"export_dir": str(target_dir.resolve()), "files": []}
+            
+        files_info = []
+        supported_exts = {".txt", ".csv", ".xlsx", ".pdf"}
+        
+        for p in target_dir.iterdir():
+            if p.is_file() and p.suffix.lower() in supported_exts:
+                stat = p.stat()
+                files_info.append({
+                    "name": p.name,
+                    "absolute_path": str(p.resolve()),
+                    "size_bytes": stat.st_size,
+                    "created_at": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    "format": p.suffix[1:].lower(),
+                })
+        
+        # Sort by creation time descending (newest first)
+        files_info.sort(key=lambda x: x["created_at"], reverse=True)
+        return {
+            "export_dir": str(target_dir.resolve()),
+            "files": files_info
+        }
+    except Exception as e:
+        logger.exception("Failed to list exports")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/exports/{filename}/download")
+async def download_exported_file(filename: str):
+    try:
+        target_dir = get_export_dir()
+        file_path = target_dir / filename
+        
+        if file_path.parent.resolve() != target_dir.resolve():
+            raise HTTPException(status_code=400, detail="Invalid path traversal attempt")
+            
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        mime_map = {
+            ".txt":   "text/plain; charset=utf-8",
+            ".csv":   "text/csv; charset=utf-8",
+            ".xlsx":  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".pdf":   "application/pdf",
+        }
+        media_type = mime_map.get(file_path.suffix.lower(), "application/octet-stream")
+        
+        return FileResponse(
+            str(file_path),
+            media_type=media_type,
+            filename=filename,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to download export")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/exports/{filename}")
+async def delete_exported_file(filename: str):
+    try:
+        target_dir = get_export_dir()
+        file_path = target_dir / filename
+        
+        if file_path.parent.resolve() != target_dir.resolve():
+            raise HTTPException(status_code=400, detail="Invalid path traversal attempt")
+            
+        if not file_path.exists() or not file_path.is_file():
+            raise HTTPException(status_code=404, detail="File not found")
+            
+        file_path.unlink()
+        logger.info(f"Deleted exported file: {filename}")
+        return {"success": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Failed to delete export")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -92,6 +92,19 @@ const ja = {
   txtConvBtnConvert: "超節約 PDFにコンパイル・出力",
   txtConvSuccess: "PDFの書き出しに成功しました！",
   txtConvError: "PDFの出力に失敗しました。フォーマットを確認してください。",
+  diarizationMode: "話者認識 (複数人の会話)",
+  diarizationModeEnabled: "有効 (話者検出あり) / Enabled",
+  diarizationModeDisabled: "無効 (話者検出なし) / Disabled",
+  modelQwen3Asr06b: "Qwen3-ASR 0.6B (超高速/低レイテンシ)",
+  modelQwen3Asr17b: "Qwen3-ASR 1.7B (高精度)",
+  tabExports: "出力ファイル",
+  exportsTitle: "出力ファイル管理",
+  exportsSubtitle: "これまでにエクスポートされたドキュメント（Excel, PDF, CSV, TXT）の一覧を表示・管理します。",
+  exportsEmpty: "出力ファイルが見つかりません。文字起こし履歴の各カードからエクスポートを実行してください。",
+  exportsOpen: "開く",
+  exportsShowFolder: "フォルダを開く",
+  exportsDelete: "削除",
+  exportsConfirmDelete: "このファイルを完全に削除してもよろしいですか？",
 };
 
 export default ja;
