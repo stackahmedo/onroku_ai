@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-const getApiUrl = () => {
+const getApiUrl = (): string => {
   const saved = localStorage.getItem('api_url');
   if (saved && saved.trim() !== '') {
     return saved.trim();
@@ -11,19 +11,34 @@ const getApiUrl = () => {
 };
 const API = getApiUrl();
 
-const TIER_ICONS  = { light: '🔴', medium: '🟡', heavy: '🟢' };
-const TIER_LABELS = { light: 'Light', medium: 'Medium', heavy: 'Heavy' };
+const TIER_ICONS: Record<string, string> = { light: '🔴', medium: '🟡', heavy: '🟢' };
 
-export default function HardwareInfo({ t }) {
-  const [hw, setHw] = useState(null);
+interface HardwareData {
+  tier?: 'light' | 'medium' | 'heavy';
+  chunk_seconds?: number;
+  model_name?: string;
+  cpu_name?: string;
+  gpu_available?: boolean;
+  gpu_name?: string;
+  gpu_vram_gb?: number;
+  ram_gb?: number;
+  device?: string;
+}
+
+interface HardwareInfoProps {
+  t: Record<string, string>;
+}
+
+export default function HardwareInfo({ t }: HardwareInfoProps) {
+  const [hw, setHw] = useState<HardwareData | null>(null);
 
   useEffect(() => {
     let active = true;
-    let timer;
+    let timer: NodeJS.Timeout;
 
     const load = async () => {
       try {
-        let data;
+        let data: HardwareData;
         if (window.electron) {
           data = await window.electron.api.getHardware();
         } else {

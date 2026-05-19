@@ -1,6 +1,11 @@
 import React from 'react';
 
-export default function LanguageSwitcher({ uiLang, onToggle }) {
+interface LanguageSwitcherProps {
+  uiLang: string;
+  onToggle: () => void;
+}
+
+export default function LanguageSwitcher({ uiLang, onToggle }: LanguageSwitcherProps) {
   const isJa = uiLang === 'ja';
   return (
     <button

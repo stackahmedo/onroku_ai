@@ -14,25 +14,37 @@
     "react-scripts": "5.0.1"
   },
   "devDependencies": {
+    "@types/node": "^25.9.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "concurrently": "^8.2.1",
     "cross-env": "^7.0.3",
+    "typescript": "^6.0.3",
     "wait-on": "^9.0.0"
   },
   "scripts": {
-    "react-start":    "react-scripts start",
-    "react-build":    "react-scripts build",
-    "electron-dev":   "cross-env NODE_ENV=development electron app/frontend/main.js --dev",
-    "start":          "concurrently \"npm run react-start\" \"wait-on http://localhost:3000 && npm run electron-dev\"",
-    "build":          "npm run react-build",
-    "dist":           "npm run react-build && electron-builder",
-    "backend":        "cd app/backend && python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
+    "react-start": "react-scripts start",
+    "react-build": "react-scripts build",
+    "electron-dev": "cross-env NODE_ENV=development electron app/frontend/main.js --dev",
+    "start": "concurrently \"npm run react-start\" \"wait-on http://localhost:3000 && npm run electron-dev\"",
+    "build": "npm run react-build",
+    "dist": "npm run react-build && electron-builder",
+    "backend": "cd app/backend && python -m uvicorn main:app --host 127.0.0.1 --port 8000 --reload"
   },
   "eslintConfig": {
     "extends": "react-app"
   },
   "browserslist": {
-    "production": [">0.2%", "not dead", "not op_mini all"],
-    "development": ["last 1 chrome version", "last 1 firefox version", "last 1 safari version"]
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
   },
   "build": {
     "appId": "com.transcriptai.v2",
@@ -47,7 +59,10 @@
       "buildResources": "public"
     },
     "win": {
-      "target": ["nsis", "portable"],
+      "target": [
+        "nsis",
+        "portable"
+      ],
       "icon": "public/icon.ico"
     },
     "nsis": {

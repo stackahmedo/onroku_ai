@@ -1,13 +1,13 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
-import DropZone from './components/DropZone';
+import DropZone, { PseudoFile } from './components/DropZone';
 import HardwareInfo from './components/HardwareInfo';
 import LanguageSwitcher from './components/LanguageSwitcher';
-import JobCard from './components/JobCard';
+import JobCard, { Job } from './components/JobCard';
 import en from './i18n/en';
 import ja from './i18n/ja';
 
-const getApiUrl = () => {
+const getApiUrl = (): string => {
   const saved = localStorage.getItem('api_url');
   if (saved && saved.trim() !== '') {
     return saved.trim();
@@ -19,25 +19,38 @@ const getApiUrl = () => {
 const API = getApiUrl();
 const STRINGS = { en, ja };
 
+interface ToastState {
+  msg: string;
+  type: string;
+}
+
+interface ExportFile {
+  name: string;
+  format: string;
+  size_bytes: number;
+  created_at: string;
+  absolute_path?: string;
+}
+
 export default function App() {
-  const [uiLang, setUiLang]           = useState('ja');
+  const [uiLang, setUiLang]           = useState<'en' | 'ja'>('ja');
   const [transcribeLang, setTranscribeLang] = useState('auto');
   const [transcribeModel, setTranscribeModel] = useState('auto');
   const [speakerCount, setSpeakerCount] = useState('auto');
   const [chunkSeconds, setChunkSeconds] = useState('auto');
   const [diarizationMode, setDiarizationMode] = useState('accurate');
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [jobs, setJobs]               = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState<(File | PseudoFile)[]>([]);
+  const [jobs, setJobs]               = useState<Job[]>([]);
   const [loading, setLoading]         = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0); // 0-100 upload %
   const [uploadPhase, setUploadPhase] = useState(''); // 'uploading' | 'processing' | ''
   const [uploadNotice, setUploadNotice] = useState(''); // Live text for current sequential job
-  const [toast, setToast]             = useState(null);
-  const [backendOk, setBackendOk]     = useState(null);
+  const [toast, setToast]             = useState<ToastState | null>(null);
+  const [backendOk, setBackendOk]     = useState<boolean | null>(null);
 
   const [performanceMode, setPerformanceMode] = useState('auto');
   const speakerRange = 'normal';
-  const [hwProfile, setHwProfile] = useState(null);
+  const [hwProfile, setHwProfile] = useState<any>(null);
 
   // New features state
   const [activeTab, setActiveTab] = useState('completed');
@@ -66,11 +79,11 @@ export default function App() {
   const [txtSpeakerRenames, setTxtSpeakerRenames] = useState('');
   const [txtSpeakerColors, setTxtSpeakerColors] = useState('');
   const [txtCustomFontName, setTxtCustomFontName] = useState('');
-  const [txtCustomFontFile, setTxtCustomFontFile] = useState(null);
+  const [txtCustomFontFile, setTxtCustomFontFile] = useState<File | null>(null);
   const [txtSilenceDetection, setTxtSilenceDetection] = useState(false);
-  const [txtSilenceThreshold, setTxtSilenceThreshold] = useState(4);
+  const [txtSilenceThreshold, setTxtSilenceThreshold] = useState('4');
   const [isConvertingTxt, setIsConvertingTxt] = useState(false);
-  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState<string | null>(null);
 
   // Revoke object URL on unmount or URL replacement
   useEffect(() => {
@@ -80,29 +93,31 @@ export default function App() {
       }
     };
   }, [pdfPreviewUrl]);
+
   useEffect(() => {
     if (txtOutputFormat !== 'pdf' && pdfPreviewUrl) {
       window.URL.revokeObjectURL(pdfPreviewUrl);
       setPdfPreviewUrl(null);
     }
   }, [txtOutputFormat, pdfPreviewUrl]);
+
   const [isSearchingAPI, setIsSearchingAPI] = useState(false);
-  const [testResult, setTestResult] = useState(null);
+  const [testResult, setTestResult] = useState<{ success: boolean; message: string } | null>(null);
   const [isClearingCache, setIsClearingCache] = useState(false);
-  const [logs, setLogs] = useState([]);
+  const [logs, setLogs] = useState<string[]>([]);
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
   const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
-  const [exportedFiles, setExportedFiles] = useState([]);
+  const [exportedFiles, setExportedFiles] = useState<ExportFile[]>([]);
   const [exportsDir, setExportsDir] = useState('');
   const [isLoadingExports, setIsLoadingExports] = useState(false);
-  const terminalBodyRef = useRef(null);
+  const terminalBodyRef = useRef<HTMLDivElement>(null);
 
   // Sync theme changes to localStorage
   useEffect(() => {
     localStorage.setItem('theme', theme);
   }, [theme]);
 
-  const t = STRINGS[uiLang];
+  const t = STRINGS[uiLang] || STRINGS['ja'];
 
   // ── Backend health check ─────────────────────────────────
   useEffect(() => {
@@ -216,7 +231,7 @@ export default function App() {
         const errData = await res.json();
         showToast(`${t.settingsSaveFailed}: ${errData.detail || 'Error'}`, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       const prevApiUrl = localStorage.getItem('api_url') || '';
       const newApiUrl = settingsApiUrl.trim();
       localStorage.setItem('api_url', newApiUrl);
@@ -247,7 +262,7 @@ export default function App() {
       `http://127.0.0.1:8000`
     ];
     
-    const uniqueCandidates = [...new Set(candidates)];
+    const uniqueCandidates = Array.from(new Set(candidates));
     
     let found = null;
     for (const url of uniqueCandidates) {
@@ -410,7 +425,7 @@ export default function App() {
     }
   }, [activeTab, loadExportedFiles]);
 
-  const handleDeleteExportFile = async (fileName) => {
+  const handleDeleteExportFile = async (fileName: string) => {
     let proceed = false;
     if (window.electron && window.electron.win && window.electron.win.confirm) {
       proceed = await window.electron.win.confirm({
@@ -432,7 +447,7 @@ export default function App() {
       } else {
         showToast(uiLang === 'ja' ? 'ファイルの削除に失敗しました' : 'Failed to delete file', 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       showToast(`Error: ${err.message}`, 'error');
     }
   };
@@ -445,7 +460,7 @@ export default function App() {
     }
   };
 
-  const handleOpenExportFile = async (file) => {
+  const handleOpenExportFile = async (file: ExportFile) => {
     if (window.electron && file.absolute_path) {
       await window.electron.shell.open(file.absolute_path);
     } else {
@@ -456,26 +471,28 @@ export default function App() {
     }
   };
 
-  const handleShowExportInFolder = async (file) => {
+  const handleShowExportInFolder = async (file: ExportFile) => {
     if (window.electron && file.absolute_path) {
       await window.electron.shell.showItem(file.absolute_path);
     }
   };
 
   // ── Toast helper ──────────────────────────────────────────
-  const showToast = (msg, type = 'info') => {
+  const showToast = (msg: string, type = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
   };
 
   // ── Converter Handlers ─────────────────────────────────────
-  const handleTxtFileChange = (e) => {
-    const file = e.target.files[0];
+  const handleTxtFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (event) => {
-      setTxtInputText(event.target.result);
-      showToast(uiLang === 'ja' ? 'ファイルを読み込みました！' : 'TXT file loaded successfully!', 'success');
+      if (event.target && typeof event.target.result === 'string') {
+        setTxtInputText(event.target.result);
+        showToast(uiLang === 'ja' ? 'ファイルを読み込みました！' : 'TXT file loaded successfully!', 'success');
+      }
     };
     reader.readAsText(file);
   };
@@ -667,19 +684,19 @@ export default function App() {
     );
   };
 
-  const parsePdfMakerMap = (value) => {
+  const parsePdfMakerMap = (value: string) => {
     return value
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter(Boolean)
-      .reduce((acc, line) => {
+      .reduce((acc: Record<string, string>, line) => {
         const [key, ...rest] = line.split('=');
         if (key && rest.length) acc[key.trim()] = rest.join('=').trim();
         return acc;
       }, {});
   };
 
-  const readFileAsBase64 = (file) => new Promise((resolve, reject) => {
+  const readFileAsBase64 = (file: File): Promise<string> => new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const result = typeof reader.result === 'string' ? reader.result : '';
@@ -691,7 +708,7 @@ export default function App() {
     reader.readAsDataURL(file);
   });
 
-  const getDownloadFilename = (res, fallbackExtension) => {
+  const getDownloadFilename = (res: Response, fallbackExtension: string) => {
     const disposition = res.headers.get('content-disposition') || '';
     const utf8Match = disposition.match(/filename\*=UTF-8''([^;]+)/i);
     if (utf8Match) {
@@ -787,7 +804,7 @@ export default function App() {
         const err = await res.json();
         showToast(`${t.txtConvError}: ${err.detail || 'Error'}`, 'error');
       }
-    } catch (err) {
+    } catch (err: any) {
       showToast(`${t.txtConvError}: ${err.message}`, 'error');
     } finally {
       setIsConvertingTxt(false);
@@ -811,15 +828,15 @@ export default function App() {
       setUploadNotice(`${noticePrefix}${uiLang === 'ja' ? 'アップロード中: ' : 'Uploading: '}${file.name}`);
 
       try {
-        if (window.electron && (file._isPath || file.path)) {
+        if (window.electron && ((file as any)._isPath || (file as any).path)) {
           // Electron path (both browsed and dropped files support IPC upload)
           setUploadProgress(50);
-          await window.electron.api.upload(file.path, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange);
+          await window.electron.api.upload((file as any).path!, transcribeLang, transcribeModel, speakerCount, chunkSeconds, diarizationMode, performanceMode, speakerRange);
           setUploadProgress(100);
         } else {
           // Browser / React dev fallback
           const formData = new FormData();
-          formData.append('file', file);
+          formData.append('file', file as File);
 
           await new Promise((resolve, reject) => {
             const xhr = new XMLHttpRequest();
@@ -853,7 +870,7 @@ export default function App() {
         showToast(`✅ Job started: ${file.name}`, 'success');
         await loadJobs();
         setActiveTab('processing');
-      } catch (err) {
+      } catch (err: any) {
         showToast(`❌ ${t.errorUpload} (${file.name}): ${err.message}`, 'error');
       }
     }
@@ -865,7 +882,7 @@ export default function App() {
   };
 
   // ── Job events ────────────────────────────────────────────
-  const handleDeleted  = (id) => setJobs((prev) => prev.filter((j) => j.id !== id));
+  const handleDeleted  = (id: string) => setJobs((prev) => prev.filter((j) => j.id !== id));
   const handleCancelled = () => loadJobs();
 
   const activeJobs    = jobs.filter(j => j.status === 'transcribing' || j.status === 'pending' || j.status === 'paused');
@@ -919,7 +936,7 @@ export default function App() {
               <button
                 type="button"
                 className="header-util-btn"
-                onClick={() => window.electron.win.reload()}
+                onClick={() => window.electron!.win.reload()}
                 title={uiLang === 'ja' ? '画面を更新 / Refresh' : 'Refresh Page'}
                 id="win-reload-btn"
               >
@@ -931,7 +948,7 @@ export default function App() {
               <button
                 type="button"
                 className="win-ctrl-btn win-ctrl-btn--min"
-                onClick={() => window.electron.win.minimize()}
+                onClick={() => window.electron!.win.minimize()}
                 title={uiLang === 'ja' ? '最小化 / Minimize' : 'Minimize'}
               >
                 —
@@ -939,7 +956,7 @@ export default function App() {
               <button
                 type="button"
                 className="win-ctrl-btn win-ctrl-btn--max"
-                onClick={() => window.electron.win.maximize()}
+                onClick={() => window.electron!.win.maximize()}
                 title={uiLang === 'ja' ? '最大化・元に戻す / Maximize' : 'Maximize / Restore'}
               >
                 ⬜
@@ -947,7 +964,7 @@ export default function App() {
               <button
                 type="button"
                 className="win-ctrl-btn win-ctrl-btn--close"
-                onClick={() => window.electron.win.close()}
+                onClick={() => window.electron!.win.close()}
                 title={uiLang === 'ja' ? '閉じる / Close' : 'Close'}
               >
                 ✕
@@ -1076,8 +1093,6 @@ export default function App() {
                 <option value="off">{t.diarizationModeDisabled || '無効 (話者検出なし) / Disabled'}</option>
               </select>
             </div>
-
-
 
             {/* Chunk seconds selector */}
             <div className="lang-select-row">
@@ -1632,11 +1647,11 @@ export default function App() {
                     <tbody>
                       {exportedFiles.map((file, idx) => {
                         // Custom format colors and icons
-                        const formatConfig = {
+                        const formatConfig: { icon: string; color: string; label: string } = ({
                           doc:  { icon: '📝', color: '#3b82f6', label: 'Word' },
                           pdf:  { icon: '📕', color: '#ef4444', label: 'PDF' },
                           txt:  { icon: '📄', color: '#94a3b8', label: 'TXT' }
-                        }[file.format] || { icon: '📄', color: 'var(--clr-text-muted)', label: file.format.toUpperCase() };
+                        } as Record<string, { icon: string; color: string; label: string }>)[file.format] || { icon: '📄', color: 'var(--clr-text-muted)', label: file.format.toUpperCase() };
 
                         const formattedSize = file.size_bytes > 1024 * 1024
                           ? `${(file.size_bytes / 1024 / 1024).toFixed(1)} MB`

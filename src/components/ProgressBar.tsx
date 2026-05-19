@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const getApiUrl = () => {
+const getApiUrl = (): string => {
   const saved = localStorage.getItem('api_url');
   if (saved && saved.trim() !== '') {
     return saved.trim();
@@ -11,13 +11,29 @@ const getApiUrl = () => {
 };
 const API = getApiUrl();
 
-export default function ProgressBar({ jobId, status, initialPct = 0, initialLabel = '', fileSize: initialFileSize = 0, duration: initialDuration = null }) {
-  const [pct, setPct]           = useState(initialPct);
-  const [label, setLabel]       = useState(initialLabel);
-  const [elapsed, setElapsed]   = useState(0);
-  const [duration, setDuration] = useState(initialDuration);
-  const [fileSize, setFileSize] = useState(initialFileSize);
-  const esRef = useRef(null);
+interface ProgressBarProps {
+  jobId: string;
+  status: string;
+  initialPct?: number;
+  initialLabel?: string;
+  fileSize?: number;
+  duration?: number | null;
+}
+
+export default function ProgressBar({
+  jobId,
+  status,
+  initialPct = 0,
+  initialLabel = '',
+  fileSize: initialFileSize = 0,
+  duration: initialDuration = null,
+}: ProgressBarProps) {
+  const [pct, setPct]           = useState<number>(initialPct);
+  const [label, setLabel]       = useState<string>(initialLabel);
+  const [elapsed, setElapsed]   = useState<number>(0);
+  const [duration, setDuration] = useState<number | null>(initialDuration);
+  const [fileSize, setFileSize] = useState<number>(initialFileSize);
+  const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => {
     if (!jobId) return;
@@ -30,7 +46,7 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
     const es = new EventSource(`${API}/progress/${jobId}`);
     esRef.current = es;
 
-    es.addEventListener('progress', (e) => {
+    es.addEventListener('progress', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
         setPct(data.pct ?? 0);
@@ -47,7 +63,7 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
       } catch {}
     });
 
-    es.addEventListener('done', (e) => {
+    es.addEventListener('done', (e: MessageEvent) => {
       try {
         const data = JSON.parse(e.data);
         setPct(data.pct ?? 100);
@@ -58,8 +74,10 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
 
     es.onerror = () => es.close();
 
-    return () => { es.close(); };
-  }, [jobId, status]);
+    return () => {
+      es.close();
+    };
+  }, [jobId, status, initialPct]);
 
   // Local clock ticker for smooth second increment during transcription
   useEffect(() => {
@@ -73,7 +91,7 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
     return () => clearInterval(interval);
   }, [status, pct]);
 
-  const formatTime = (secs) => {
+  const formatTime = (secs: number) => {
     if (isNaN(secs) || secs < 0) return '00:00';
     const m = Math.floor(secs / 60);
     const s = Math.floor(secs % 60);
@@ -112,7 +130,7 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
               📦 {(fileSize / 1024 / 1024).toFixed(1)} MB
             </span>
           )}
-          {duration > 0 && (
+          {duration !== null && duration > 0 && (
             <span className="progress-dur" style={{ fontSize: '11px', color: 'var(--clr-text-muted)', marginLeft: '8px' }}>
               ⏱️ {formatTime(duration)}
             </span>

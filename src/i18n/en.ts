@@ -1,5 +1,5 @@
-// i18n/en.js  –  English UI strings
-const en = {
+// i18n/en.ts  –  English UI strings
+const en: Record<string, string> = {
   appTitle: "Onroku AI 6.5",
   appSubtitle: "Offline Multi-Speaker Japanese Transcription",
   dropzonePrompt: "Drag & drop audio / video here",
@@ -47,6 +47,7 @@ const en = {
   errorCancel: "Cancel failed",
   errorPause: "Pause failed",
   errorResume: "Resume failed",
+  errorDelete: "Delete failed", // standard utility key if needed
   minutes: "min",
   editSpeakers: "Edit Speakers",
   save: "Save",

@@ -1,22 +1,34 @@
-import React, { useRef, useState, useCallback } from 'react';
+import React, { useRef, useState, useCallback, DragEvent, KeyboardEvent } from 'react';
 
 const MAX_SIZE_GB = 3;
 const MAX_BYTES = MAX_SIZE_GB * 1024 ** 3;
 
-export default function DropZone({ onFilesSelected, t }) {
+export interface PseudoFile {
+  name: string;
+  path?: string;
+  size: number;
+  _isPath?: boolean;
+}
+
+interface DropZoneProps {
+  onFilesSelected: (files: (File | PseudoFile)[]) => void;
+  t: Record<string, string>;
+}
+
+export default function DropZone({ onFilesSelected, t }: DropZoneProps) {
   const [dragging, setDragging] = useState(false);
   const [warning, setWarning]   = useState('');
-  const inputRef = useRef(null);
-  const folderInputRef = useRef(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = useCallback((files) => {
+  const handleFiles = useCallback((files: (File | PseudoFile)[]) => {
     if (!files || files.length === 0) return;
     const tooLarge = files.some(f => f.size > MAX_BYTES);
     setWarning(tooLarge ? t.fileWarning3GB : '');
     onFilesSelected(files);
   }, [onFilesSelected, t]);
 
-  const onDrop = (e) => {
+  const onDrop = (e: DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setDragging(false);
     const files = Array.from(e.dataTransfer.files);
@@ -28,7 +40,7 @@ export default function DropZone({ onFilesSelected, t }) {
       window.electron.file.openDialog().then(filePaths => {
         if (filePaths && filePaths.length > 0) {
           const pseudos = filePaths.map(filePath => ({
-            name: filePath.split(/[\\/]/).pop(),
+            name: filePath.split(/[\\/]/).pop() || filePath,
             path: filePath,
             size: 0,
             _isPath: true
@@ -41,13 +53,13 @@ export default function DropZone({ onFilesSelected, t }) {
     }
   };
 
-  const onBrowseFolder = (e) => {
+  const onBrowseFolder = (e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (window.electron) {
       window.electron.file.openDirectoryDialog().then(filePaths => {
         if (filePaths && filePaths.length > 0) {
           const pseudos = filePaths.map(filePath => ({
-            name: filePath.split(/[\\/]/).pop(),
+            name: filePath.split(/[\\/]/).pop() || filePath,
             path: filePath,
             size: 0,
             _isPath: true
@@ -70,7 +82,7 @@ export default function DropZone({ onFilesSelected, t }) {
         onClick={onBrowse}
         role="button"
         tabIndex={0}
-        onKeyDown={(e) => e.key === 'Enter' && onBrowse()}
+        onKeyDown={(e: KeyboardEvent<HTMLDivElement>) => e.key === 'Enter' && onBrowse()}
         id="dropzone-area"
       >
         <input
@@ -79,18 +91,25 @@ export default function DropZone({ onFilesSelected, t }) {
           multiple
           accept="audio/*,video/*,.mp3,.wav,.flac,.m4a,.ogg,.aac,.mp4,.mov,.mkv,.avi"
           style={{ display: 'none' }}
-          onChange={(e) => handleFiles(Array.from(e.target.files))}
+          onChange={(e) => {
+            if (e.target.files) {
+              handleFiles(Array.from(e.target.files));
+            }
+          }}
           id="file-input-hidden"
         />
 
         <input
           ref={folderInputRef}
           type="file"
-          webkitdirectory="true"
-          directory="true"
+          {...({ webkitdirectory: "true", directory: "true" } as any)}
           multiple
           style={{ display: 'none' }}
-          onChange={(e) => handleFiles(Array.from(e.target.files))}
+          onChange={(e) => {
+            if (e.target.files) {
+              handleFiles(Array.from(e.target.files));
+            }
+          }}
           id="folder-input-hidden"
         />
 
@@ -118,7 +137,7 @@ export default function DropZone({ onFilesSelected, t }) {
           <button
             type="button"
             className="btn btn-dropzone-action btn-browse-folder"
-            onClick={onBrowseFolder}
+            onClick={(e) => onBrowseFolder(e)}
           >
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
               <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>

@@ -1,5 +1,5 @@
-// i18n/ja.js  –  Japanese UI strings
-const ja = {
+// i18n/ja.ts  –  Japanese UI strings
+const ja: Record<string, string> = {
   appTitle: "音録AI 6.5",
   appSubtitle: "オフライン多話者日本語文字起こし",
   dropzonePrompt: "音声・動画ファイルをここにドラッグ＆ドロップ",
@@ -47,6 +47,7 @@ const ja = {
   errorCancel: "キャンセルに失敗しました",
   errorPause: "一時停止に失敗しました",
   errorResume: "再開に失敗しました",
+  errorDelete: "削除に失敗しました",
   minutes: "分",
   editSpeakers: "話者名編集",
   save: "保存",

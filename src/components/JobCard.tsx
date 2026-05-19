@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import ProgressBar from './ProgressBar';
 
-const getApiUrl = () => {
+const getApiUrl = (): string => {
   const saved = localStorage.getItem('api_url');
   if (saved && saved.trim() !== '') {
     return saved.trim();
@@ -12,7 +12,7 @@ const getApiUrl = () => {
 };
 const API = getApiUrl();
 
-const STATUS_COLORS = {
+const STATUS_COLORS: Record<string, string> = {
   pending:       '#94a3b8',
   transcribing:  '#3b82f6',
   completed:     '#22c55e',
@@ -21,7 +21,7 @@ const STATUS_COLORS = {
   paused:        '#f59e0b',
 };
 
-const STATUS_ICONS = {
+const STATUS_ICONS: Record<string, string> = {
   pending:       '⏳',
   transcribing:  '🎙️',
   completed:     '✅',
@@ -30,11 +30,44 @@ const STATUS_ICONS = {
   paused:        '⏸️',
 };
 
-export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChanged }) {
+export interface Job {
+  id: string;
+  filename: string;
+  status: 'pending' | 'transcribing' | 'completed' | 'failed' | 'cancelled' | 'paused';
+  file_path?: string;
+  file_size_bytes: number;
+  duration_seconds: number;
+  progress_pct?: number;
+  progress_label?: string;
+  error_message?: string;
+  created_at?: string;
+  hardware_tier?: string;
+  model_name?: string;
+  segment_count?: number;
+  speaker_count?: number;
+  language?: string;
+}
+
+export interface Segment {
+  start: number;
+  end: number;
+  speaker?: string;
+  text: string;
+}
+
+interface JobCardProps {
+  job: Job;
+  t: Record<string, string>;
+  onDeleted?: (jobId: string) => void;
+  onCancelled?: (jobId: string) => void;
+  onStatusChanged?: (jobId: string) => void;
+}
+
+export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChanged }: JobCardProps) {
   const [exporting, setExporting] = useState(false);
   const [showEdit, setShowEdit] = useState(false);
-  const [speakers, setSpeakers] = useState([]);
-  const [editMap, setEditMap] = useState({});
+  const [speakers, setSpeakers] = useState<string[]>([]);
+  const [editMap, setEditMap] = useState<Record<string, string>>({});
   const [loadingSpeakers, setLoadingSpeakers] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showMetadata, setShowMetadata] = useState(false);
@@ -55,14 +88,14 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
     }
   };
 
-  const formatDuration = (sec) => {
+  const formatDuration = (sec: number) => {
     if (!sec) return '0m 0s';
     const m = Math.floor(sec / 60);
     const s = Math.round(sec % 60);
     return `${m}m ${s}s`;
   };
 
-  const formatDate = (isoStr) => {
+  const formatDate = (isoStr?: string) => {
     if (!isoStr) return 'Unknown';
     try {
       const d = new Date(isoStr);
@@ -84,16 +117,16 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
       const res = await fetch(`${API}/transcript/${job.id}`);
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
-      const unique = Array.from(new Set(data.segments.map(s => s.speaker || 'Unknown')));
+      const unique = Array.from(new Set(data.segments.map((s: Segment) => s.speaker || 'Unknown'))) as string[];
       const validSpeakers = unique.filter(s => s);
       setSpeakers(validSpeakers);
       
-      const initialMap = {};
+      const initialMap: Record<string, string> = {};
       validSpeakers.forEach(s => {
         initialMap[s] = s;
       });
       setEditMap(initialMap);
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.renameFailed || '話者名の読み込みに失敗しました'}: ${err.message}`);
       setShowEdit(false);
     } finally {
@@ -113,14 +146,14 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
       alert(t.renameSuccess || '話者名を変更しました！');
       triggerRefresh();
       setShowEdit(false);
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.renameFailed || '話者名の保存に失敗しました'}: ${err.message}`);
     } finally {
       setSaving(false);
     }
   };
 
-  const handleExport = async (format) => {
+  const handleExport = async (format: string) => {
     setExporting(true);
     try {
       const filename = `transcript_${job.id.substring(0, 8)}.${format}`;
@@ -160,7 +193,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         a.click();
         URL.revokeObjectURL(url);
       }
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.errorExport}: ${err.message}`);
     } finally {
       setExporting(false);
@@ -175,7 +208,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         await fetch(`${API}/cancel/${job.id}`, { method: 'POST' });
       }
       onCancelled?.(job.id);
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.errorCancel}: ${err.message}`);
     }
   };
@@ -194,7 +227,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         if (!res.ok) throw new Error(await res.text());
       }
       triggerRefresh();
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.errorPause}: ${err.message}`);
     }
   };
@@ -208,7 +241,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
         if (!res.ok) throw new Error(await res.text());
       }
       triggerRefresh();
-    } catch (err) {
+    } catch (err: any) {
       alert(`${t.errorResume}: ${err.message}`);
     }
   };
@@ -268,7 +301,7 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
           )}
           {job.file_path && (
             <span style={{ maxWidth: '350px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.file_path}>
-              📁 {job.file_path.split('\\').pop().split('/').pop()}
+              📁 {job.file_path.split('\\').pop()?.split('/').pop()}
             </span>
           )}
         </div>
