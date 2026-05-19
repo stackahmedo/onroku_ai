@@ -28,4 +28,11 @@ contextBridge.exposeInMainWorld('electron', {
     open: (path) => ipcRenderer.invoke('shell:open', path),
     showItem: (path) => ipcRenderer.invoke('shell:show-item', path),
   },
+  win: {
+    minimize: () => ipcRenderer.invoke('win:minimize'),
+    maximize: () => ipcRenderer.invoke('win:maximize'),
+    close:    () => ipcRenderer.invoke('win:close'),
+    reload:   () => ipcRenderer.invoke('win:reload'),
+    restart:  () => ipcRenderer.invoke('win:restart'),
+  },
 });

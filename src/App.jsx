@@ -7,7 +7,16 @@ import JobCard from './components/JobCard';
 import en from './i18n/en';
 import ja from './i18n/ja';
 
-const API = 'http://127.0.0.1:8000';
+const getApiUrl = () => {
+  const saved = localStorage.getItem('api_url');
+  if (saved && saved.trim() !== '') {
+    return saved.trim();
+  }
+  const hostname = window.location.hostname || '127.0.0.1';
+  const protocol = window.location.protocol === 'file:' ? 'http:' : (window.location.protocol || 'http:');
+  return `${protocol}//${hostname}:8000`;
+};
+const API = getApiUrl();
 const STRINGS = { en, ja };
 
 export default function App() {
@@ -28,9 +37,37 @@ export default function App() {
   // New features state
   const [activeTab, setActiveTab] = useState('history');
   const [settingsExportDir, setSettingsExportDir] = useState('');
+  const [pdfMaxChars, setPdfMaxChars] = useState(1000);
+  const [pdfTemplate, setPdfTemplate] = useState('corporate');
+  const [settingsApiUrl, setSettingsApiUrl] = useState(() => localStorage.getItem('api_url') || '');
+  
+  // Converter States
+  const [txtInputText, setTxtInputText] = useState('');
+  const [txtPdfTemplate, setTxtPdfTemplate] = useState('compact_terminal');
+  const [txtMaxChars, setTxtMaxChars] = useState(1000);
+  const [isConvertingTxt, setIsConvertingTxt] = useState(false);
+  const [pdfPreviewUrl, setPdfPreviewUrl] = useState(null);
+
+  // Revoke object URL on unmount or URL replacement
+  useEffect(() => {
+    return () => {
+      if (pdfPreviewUrl) {
+        window.URL.revokeObjectURL(pdfPreviewUrl);
+      }
+    };
+  }, [pdfPreviewUrl]);
+  const [isSearchingAPI, setIsSearchingAPI] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [isClearingCache, setIsClearingCache] = useState(false);
   const [logs, setLogs] = useState([]);
   const [autoScrollLogs, setAutoScrollLogs] = useState(true);
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
   const terminalBodyRef = useRef(null);
+
+  // Sync theme changes to localStorage
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+  }, [theme]);
 
   const t = STRINGS[uiLang];
 
@@ -57,6 +94,8 @@ export default function App() {
         if (res.ok) {
           const data = await res.json();
           setSettingsExportDir(data.transcript_export_dir || '');
+          setPdfMaxChars(data.pdf_max_chars_per_page || 1000);
+          setPdfTemplate(data.pdf_template || 'corporate');
         }
       } catch (err) {
         console.error('fetchSettings error:', err);
@@ -71,16 +110,115 @@ export default function App() {
       const res = await fetch(`${API}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transcript_export_dir: settingsExportDir }),
+        body: JSON.stringify({
+          transcript_export_dir: settingsExportDir,
+          pdf_max_chars_per_page: pdfMaxChars,
+          pdf_template: pdfTemplate,
+        }),
       });
       if (res.ok) {
-        showToast(t.settingsSaveSuccess, 'success');
+        const prevApiUrl = localStorage.getItem('api_url') || '';
+        const newApiUrl = settingsApiUrl.trim();
+        localStorage.setItem('api_url', newApiUrl);
+
+        if (newApiUrl !== prevApiUrl) {
+          showToast(uiLang === 'ja' ? '接続先API URLを変更しました。再読み込み中...' : 'Connection API URL updated. Reconnecting...', 'success');
+          setTimeout(() => {
+            window.location.reload();
+          }, 1500);
+        } else {
+          showToast(t.settingsSaveSuccess, 'success');
+        }
       } else {
         const errData = await res.json();
         showToast(`${t.settingsSaveFailed}: ${errData.detail || 'Error'}`, 'error');
       }
     } catch (err) {
-      showToast(`${t.settingsSaveFailed}: ${err.message}`, 'error');
+      const prevApiUrl = localStorage.getItem('api_url') || '';
+      const newApiUrl = settingsApiUrl.trim();
+      localStorage.setItem('api_url', newApiUrl);
+
+      if (newApiUrl !== prevApiUrl) {
+        showToast(uiLang === 'ja' ? '接続先API URLを変更しました。再読み込み中...' : 'Connection API URL updated. Reconnecting...', 'success');
+        setTimeout(() => {
+          window.location.reload();
+        }, 1500);
+      } else {
+        showToast(`${t.settingsSaveFailed}: ${err.message}`, 'error');
+      }
+    }
+  };
+
+  // ── Auto Searching & Connection Testing ──────────────────────────
+  const handleAutoSearchAPI = async () => {
+    setIsSearchingAPI(true);
+    setTestResult(null);
+    showToast(uiLang === 'ja' ? 'バックエンドサーバーを自動検索中...' : 'Searching for backend servers...', 'info');
+
+    const currentHost = window.location.hostname || 'localhost';
+    const protocol = window.location.protocol || 'http:';
+    
+    const candidates = [
+      `${protocol}//${currentHost}:8000`,
+      `http://localhost:8000`,
+      `http://127.0.0.1:8000`
+    ];
+    
+    const uniqueCandidates = [...new Set(candidates)];
+    
+    let found = null;
+    for (const url of uniqueCandidates) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 1200);
+        
+        const res = await fetch(`${url}/health`, { signal: controller.signal });
+        clearTimeout(timeoutId);
+        if (res.ok) {
+          found = url;
+          break;
+        }
+      } catch (err) {}
+    }
+    
+    setIsSearchingAPI(false);
+    if (found) {
+      setSettingsApiUrl(found);
+      setTestResult({ success: true, message: uiLang === 'ja' ? `接続可能なサーバーを発見しました: ${found}` : `Active server found: ${found}` });
+      showToast(uiLang === 'ja' ? '接続可能なサーバーが見つかりました！' : 'Active backend server discovered!', 'success');
+    } else {
+      setTestResult({ success: false, message: uiLang === 'ja' ? '接続可能なサーバーが見つかりませんでした。起動しているか確認してください。' : 'No active backend server found. Please ensure your server is running.' });
+      showToast(uiLang === 'ja' ? 'サーバーが見つかりませんでした。' : 'No server discovered.', 'error');
+    }
+  };
+
+  const handleTestConnection = async () => {
+    const url = settingsApiUrl.trim();
+    if (!url) {
+      setTestResult({ success: false, message: uiLang === 'ja' ? 'URLを入力してください。' : 'Please enter a URL first.' });
+      return;
+    }
+    
+    setTestResult(null);
+    showToast(uiLang === 'ja' ? '接続確認中...' : 'Testing connection...', 'info');
+    
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 2000);
+      
+      const res = await fetch(`${url}/health`, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (res.ok) {
+        setTestResult({ success: true, message: uiLang === 'ja' ? `接続成功! サーバーは正常に稼働しています (${url})` : `Connection success! Server is online (${url})` });
+        showToast(uiLang === 'ja' ? '接続テスト成功！正常に通信できます。' : 'Connection test successful!', 'success');
+      } else {
+        setTestResult({ success: false, message: uiLang === 'ja' ? `ステータスエラー: ${res.status}` : `Server returned status code: ${res.status}` });
+        showToast(uiLang === 'ja' ? '接続失敗: ステータス異常' : 'Connection failed: abnormal status', 'error');
+      }
+    } catch (err) {
+      setTestResult({ success: false, message: uiLang === 'ja' ? '接続できませんでした。URLまたはサーバー状態を確認してください。' : 'Unable to connect. Please verify the URL or server status.' });
+      showToast(uiLang === 'ja' ? '接続失敗' : 'Connection failed', 'error');
     }
   };
 
@@ -95,6 +233,24 @@ export default function App() {
       } catch (err) {
         console.error('selectDirectoryPath error:', err);
       }
+    }
+  };
+
+  // ── Clear Cache ─────────────────────────────────────────────
+  const handleClearCache = async () => {
+    setIsClearingCache(true);
+    try {
+      const res = await fetch(`${API}/clear-cache`, { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        showToast(`${t.settingsClearCacheSuccess}${data.mb_cleared} MB!`, 'success');
+      } else {
+        showToast(uiLang === 'ja' ? 'キャッシュのクリアに失敗しました' : 'Failed to clear cache', 'error');
+      }
+    } catch (err) {
+      showToast(uiLang === 'ja' ? 'エラーが発生しました' : 'Error connecting to server', 'error');
+    } finally {
+      setIsClearingCache(false);
     }
   };
 
@@ -152,6 +308,89 @@ export default function App() {
   const showToast = (msg, type = 'info') => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 4000);
+  };
+
+  // ── Converter Handlers ─────────────────────────────────────
+  const handleTxtFileChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      setTxtInputText(event.target.result);
+      showToast(uiLang === 'ja' ? 'ファイルを読み込みました！' : 'TXT file loaded successfully!', 'success');
+    };
+    reader.readAsText(file);
+  };
+
+  const loadExampleTxt = () => {
+    setTxtInputText(
+      "00:00:12 | 話者6 | このまま1-9-3まるまつばらが 工事です\n" +
+      "00:00:15 | 話者9 | おり青いです\n" +
+      "00:00:16 | 話者6 | さてトランプ大統領は 米中階段を終えて\n" +
+      "00:00:19 | 話者6 | ペキンを後にしました\n" +
+      "00:00:21 | 話者6 | 今日いくつかの防疫協定を 結んだと語りました\n" +
+      "00:00:25 | 話者6 | 米中どちらが 少者と言えるんでしょうか\n" +
+      "00:00:28 | 話者6 | また少年となっていた タイア問題といらん問題は\n" +
+      "00:00:31 | 話者6 | 階段によって今後 どんなふうに変わって 可能性がある\n" +
+      "00:00:36 | 話者6 | さらに 高知総理が 帰国のとについたトランプしと\n" +
+      "00:00:39 | 話者9 | 電話階段を こんなを見てほしいです\n" +
+      "00:00:41 | 話者6 | 今日は米中階段の 本質を読み取りたいと\n" +
+      "00:00:44 | 話者6 | 読むように思っております\n" +
+      "00:00:46 | 話者9 | 今夜のゲストを紹介します"
+    );
+    showToast(uiLang === 'ja' ? 'サンプルデータを読み込みました！' : 'Sample grid data loaded!', 'info');
+  };
+
+  const handleConvertTxtToPdf = async (shouldDownload = false) => {
+    const trimmed = txtInputText.trim();
+    if (!trimmed) {
+      showToast(uiLang === 'ja' ? 'テキストを入力するか、ファイルをアップロードしてください。' : 'Please paste text or load a file first.', 'error');
+      return;
+    }
+    
+    setIsConvertingTxt(true);
+    showToast(uiLang === 'ja' ? 'PDFを生成中...' : 'Generating PDF...', 'info');
+    
+    try {
+      const res = await fetch(`${API}/convert-txt-to-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          text: trimmed,
+          pdf_template: txtPdfTemplate,
+          max_chars: txtMaxChars,
+        }),
+      });
+      
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        
+        // Revoke old preview URL if exists
+        if (pdfPreviewUrl) {
+          window.URL.revokeObjectURL(pdfPreviewUrl);
+        }
+        
+        setPdfPreviewUrl(url);
+        showToast(uiLang === 'ja' ? 'PDFプレビューを更新しました！' : 'PDF preview updated successfully!', 'success');
+        
+        if (shouldDownload) {
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = 'converted_transcript.pdf';
+          document.body.appendChild(a);
+          a.click();
+          a.remove();
+        }
+      } else {
+        const err = await res.json();
+        showToast(`${t.txtConvError}: ${err.detail || 'Error'}`, 'error');
+      }
+    } catch (err) {
+      showToast(`${t.txtConvError}: ${err.message}`, 'error');
+    } finally {
+      setIsConvertingTxt(false);
+    }
   };
 
   // ── Upload ────────────────────────────────────────────────
@@ -234,11 +473,22 @@ export default function App() {
   const otherJobs     = jobs.filter(j => !['transcribing','pending','paused','completed'].includes(j.status));
 
   return (
-    <div className="app">
+    <div className="app" data-theme={theme}>
       {/* ── Header ── */}
       <header className="app-header">
         <div className="app-header__left">
-          <span className="app-logo">🎙️</span>
+          <img
+            src="./logo.png"
+            alt="Onroku AI Logo"
+            className="app-logo-img"
+            style={{
+              height: '42px',
+              width: 'auto',
+              filter: 'drop-shadow(0 0 10px rgba(96, 165, 250, 0.35))',
+              borderRadius: '6px',
+              marginRight: '6px'
+            }}
+          />
           <div>
             <h1 className="app-title">{t.appTitle}</h1>
             <p className="app-subtitle">{t.appSubtitle}</p>
@@ -251,6 +501,59 @@ export default function App() {
             title={backendOk ? 'Backend connected' : 'Backend offline'}
           />
           <LanguageSwitcher uiLang={uiLang} onToggle={() => setUiLang(u => u === 'en' ? 'ja' : 'en')} />
+          
+          {/* Theme switcher toggle */}
+          <button
+            type="button"
+            className="theme-toggle"
+            onClick={() => setTheme(t => t === 'dark' ? 'light' : 'dark')}
+            title={theme === 'dark' ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            id="theme-toggle-btn"
+          >
+            <span className="theme-toggle__icon">{theme === 'dark' ? '☀️' : '🌙'}</span>
+          </button>
+
+          {/* Electron window controls & utilities */}
+          {window.electron && (
+            <div className="electron-controls" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '12px' }}>
+              <button
+                type="button"
+                className="header-util-btn"
+                onClick={() => window.electron.win.reload()}
+                title={uiLang === 'ja' ? '画面を更新 / Refresh' : 'Refresh Page'}
+                id="win-reload-btn"
+              >
+                🔄
+              </button>
+              
+              <div className="win-control-divider" style={{ width: '1px', height: '18px', background: 'var(--clr-border)', margin: '0 4px' }} />
+
+              <button
+                type="button"
+                className="win-ctrl-btn win-ctrl-btn--min"
+                onClick={() => window.electron.win.minimize()}
+                title={uiLang === 'ja' ? '最小化 / Minimize' : 'Minimize'}
+              >
+                —
+              </button>
+              <button
+                type="button"
+                className="win-ctrl-btn win-ctrl-btn--max"
+                onClick={() => window.electron.win.maximize()}
+                title={uiLang === 'ja' ? '最大化・元に戻す / Maximize' : 'Maximize / Restore'}
+              >
+                ⬜
+              </button>
+              <button
+                type="button"
+                className="win-ctrl-btn win-ctrl-btn--close"
+                onClick={() => window.electron.win.close()}
+                title={uiLang === 'ja' ? '閉じる / Close' : 'Close'}
+              >
+                ✕
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -421,6 +724,13 @@ export default function App() {
                 📖 {t.tabHistory}
               </button>
               <button
+                className={`tab-btn ${activeTab === 'txt_converter' ? 'tab-btn--active' : ''}`}
+                onClick={() => setActiveTab('txt_converter')}
+                id="tab-btn-txt-converter"
+              >
+                📕 {t.tabTxtConverter}
+              </button>
+              <button
                 className={`tab-btn ${activeTab === 'settings' ? 'tab-btn--active' : ''}`}
                 onClick={() => setActiveTab('settings')}
                 id="tab-btn-settings"
@@ -454,6 +764,239 @@ export default function App() {
                 <JobCard key={job.id} job={job} t={t} onDeleted={handleDeleted} onCancelled={handleCancelled} />
               ))}
             </>
+          ) : activeTab === 'txt_converter' ? (
+            <div className="txt-converter-section glass-panel" style={{ padding: '24px', borderRadius: 'var(--radius-lg)', color: 'var(--clr-text-primary)' }}>
+              <div style={{ textAlign: 'left', marginBottom: '20px' }}>
+                <h2 style={{ fontSize: '20px', fontWeight: '700', marginBottom: '6px', color: 'var(--clr-primary, #6366f1)' }}>
+                  {t.txtConvTitle}
+                </h2>
+                <p className="app-subtitle" style={{ fontSize: '13px', color: 'var(--clr-text-muted)', margin: 0 }}>
+                  {t.txtConvSubtitle}
+                </p>
+              </div>
+
+              {/* Main Content Area: Flex / Grid split depending on preview state */}
+              <div style={{ display: 'grid', gridTemplateColumns: pdfPreviewUrl ? '1fr 1fr' : '1fr 340px', gap: '20px', textAlign: 'left' }}>
+                
+                {/* Left Side: Paste text / Load file & Settings */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <label className="settings-label" style={{ margin: 0 }}>{t.txtConvLabelPaste}</label>
+                    <button 
+                      type="button" 
+                      className="btn btn-secondary" 
+                      onClick={loadExampleTxt}
+                      style={{ fontSize: '11px', padding: '4px 10px', height: 'auto' }}
+                    >
+                      💡 {uiLang === 'ja' ? 'サンプルロード' : 'Load Example'}
+                    </button>
+                  </div>
+                  
+                  <textarea
+                    style={{
+                      width: '100%',
+                      height: pdfPreviewUrl ? '360px' : '280px',
+                      background: 'rgba(0, 0, 0, 0.2)',
+                      color: '#e2e8f0',
+                      border: '1px solid var(--clr-border)',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '12px',
+                      fontSize: '13px',
+                      fontFamily: 'Consolas, Monaco, monospace',
+                      resize: 'none',
+                      outline: 'none',
+                      lineHeight: '1.5',
+                      transition: 'height 0.2s ease'
+                    }}
+                    value={txtInputText}
+                    onChange={(e) => setTxtInputText(e.target.value)}
+                    placeholder={t.txtConvPlaceholder}
+                  />
+
+                  <div style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                    <div style={{ flex: 1 }}>
+                      <label className="settings-label" style={{ display: 'block', marginBottom: '6px' }}>{t.txtConvLabelSelectFile}</label>
+                      <input
+                        type="file"
+                        accept=".txt"
+                        onChange={handleTxtFileChange}
+                        style={{
+                          fontSize: '12px',
+                          color: 'var(--clr-text-muted)',
+                          background: 'rgba(255,255,255,0.02)',
+                          border: '1px dashed var(--clr-border)',
+                          padding: '10px',
+                          borderRadius: 'var(--radius-md)',
+                          width: '100%',
+                          cursor: 'pointer'
+                        }}
+                      />
+                    </div>
+
+                    {/* Compact layout controls when preview is active */}
+                    {pdfPreviewUrl && (
+                      <div style={{ width: '220px' }}>
+                        <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+                          {t.txtConvLabelMinChars}
+                        </label>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <input
+                            type="range"
+                            min="100"
+                            max="5000"
+                            step="100"
+                            value={txtMaxChars}
+                            onChange={(e) => setTxtMaxChars(parseInt(e.target.value))}
+                            style={{ flex: 1, cursor: 'pointer' }}
+                          />
+                          <input
+                            type="number"
+                            min="50"
+                            value={txtMaxChars}
+                            onChange={(e) => setTxtMaxChars(Math.max(50, parseInt(e.target.value) || 1000))}
+                            style={{
+                              width: '60px',
+                              background: 'rgba(0, 0, 0, 0.2)',
+                              color: '#fff',
+                              border: '1px solid var(--clr-border)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '2px 4px',
+                              fontSize: '11px',
+                              textAlign: 'center'
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions when preview is active */}
+                  {pdfPreviewUrl && (
+                    <div style={{ display: 'flex', gap: '12px', marginTop: '12px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => handleConvertTxtToPdf(false)}
+                        disabled={isConvertingTxt}
+                        style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        🔄 {isConvertingTxt ? (uiLang === 'ja' ? '更新中...' : 'Updating...') : (uiLang === 'ja' ? 'プレビュー更新' : 'Update Preview')}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => handleConvertTxtToPdf(true)}
+                        style={{ flex: 1, padding: '10px', fontSize: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
+                      >
+                        💾 {uiLang === 'ja' ? 'PDFを保存' : 'Download PDF'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Side: Options when NO preview, or the Live PDF Preview frame when preview is active */}
+                {!pdfPreviewUrl ? (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', background: 'rgba(255, 255, 255, 0.02)', padding: '16px', borderRadius: 'var(--radius-md)', border: '1px solid rgba(255, 255, 255, 0.05)' }}>
+                    
+                    {/* Compaction Slider / Number */}
+                    <div>
+                      <label className="settings-label" style={{ fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+                        {t.txtConvLabelMinChars}
+                      </label>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        <input
+                          type="range"
+                          min="100"
+                          max="5000"
+                          step="100"
+                          value={txtMaxChars}
+                          onChange={(e) => setTxtMaxChars(parseInt(e.target.value))}
+                          style={{ flex: 1, cursor: 'pointer' }}
+                        />
+                        <input
+                          type="number"
+                          min="50"
+                          value={txtMaxChars}
+                          onChange={(e) => setTxtMaxChars(Math.max(50, parseInt(e.target.value) || 1000))}
+                          style={{
+                            width: '75px',
+                            background: 'rgba(0, 0, 0, 0.2)',
+                            color: '#fff',
+                            border: '1px solid var(--clr-border)',
+                            borderRadius: 'var(--radius-sm)',
+                            padding: '4px 6px',
+                            fontSize: '12px',
+                            textAlign: 'center'
+                          }}
+                        />
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--clr-text-muted)', display: 'block', marginTop: '4px' }}>
+                        {uiLang === 'ja' ? '※多いほどページ数が凝縮されます' : '* Higher value yields fewer total pages'}
+                      </span>
+                    </div>
+
+                    <div style={{ marginTop: 'auto', paddingTop: '10px' }}>
+                      <button
+                        type="button"
+                        className="btn btn-primary"
+                        onClick={() => handleConvertTxtToPdf(false)}
+                        disabled={isConvertingTxt}
+                        style={{
+                          width: '100%',
+                          padding: '12px',
+                          fontSize: '14px',
+                          fontWeight: '600',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '8px',
+                          borderRadius: 'var(--radius-md)'
+                        }}
+                      >
+                        🔍 {isConvertingTxt ? (uiLang === 'ja' ? '生成中...' : 'Generating...') : (uiLang === 'ja' ? 'PDFプレビューを生成' : 'Generate PDF Preview')}
+                      </button>
+                    </div>
+
+                  </div>
+                ) : (
+                  /* PDF Live Preview Pane */
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', height: '100%' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '12px', fontWeight: '600', color: 'var(--clr-primary)' }}>
+                        🖥️ {uiLang === 'ja' ? 'リアルタイムPDFプレビュー' : 'Live PDF Preview'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => setPdfPreviewUrl(null)}
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          color: 'var(--clr-text-muted)',
+                          fontSize: '11px',
+                          cursor: 'pointer',
+                          textDecoration: 'underline'
+                        }}
+                      >
+                        ❌ {uiLang === 'ja' ? 'プレビューを閉じる' : 'Close Preview'}
+                      </button>
+                    </div>
+
+                    <iframe
+                      src={pdfPreviewUrl}
+                      style={{
+                        width: '100%',
+                        height: '460px',
+                        background: '#333',
+                        border: '1px solid var(--clr-border)',
+                        borderRadius: 'var(--radius-md)'
+                      }}
+                      title="PDF Preview"
+                    />
+                  </div>
+                )}
+
+              </div>
+            </div>
           ) : (
             <div className="settings-section glass-panel" style={{ padding: '24px', borderRadius: 'var(--radius-lg)' }}>
               <div className="settings-group">
@@ -481,23 +1024,57 @@ export default function App() {
                     </button>
                   )}
                 </div>
+              </div>
+
+              {/* Cache Data Remover Section */}
+              <div className="settings-group" style={{ marginTop: '24px', borderTop: '1px solid rgba(255, 255, 255, 0.05)', paddingTop: '20px' }}>
+                <label className="settings-label">{t.settingsClearCache}</label>
+                <p className="app-subtitle" style={{ fontSize: '12px', margin: '-4px 0 12px 0', color: 'var(--clr-text-muted)', textAlign: 'left' }}>
+                  {t.settingsClearCacheDesc}
+                </p>
                 <button
                   type="button"
-                  className="btn btn-primary btn-settings-save"
-                  onClick={handleSaveSettings}
-                  id="settings-save-btn"
-                  style={{ marginTop: '8px' }}
+                  className="btn btn-secondary"
+                  onClick={handleClearCache}
+                  disabled={isClearingCache}
+                  id="settings-clear-cache-btn"
+                  style={{
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    color: '#f87171',
+                    border: '1px solid rgba(239, 68, 68, 0.2)',
+                    fontWeight: '600',
+                    padding: '10px 16px',
+                    transition: 'all 0.2s ease',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.2)';
+                    e.currentTarget.style.boxShadow = '0 0 12px rgba(239, 68, 68, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(239, 68, 68, 0.1)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
                 >
-                  💾 {t.save}
+                  {isClearingCache ? (uiLang === 'ja' ? 'クリア中...' : 'Clearing...') : t.settingsClearCacheBtn}
                 </button>
               </div>
+
+              <button
+                type="button"
+                className="btn btn-primary btn-settings-save"
+                onClick={handleSaveSettings}
+                id="settings-save-btn"
+                style={{ marginTop: '20px', display: 'block', width: '100%', maxWidth: '200px' }}
+              >
+                💾 {t.save}
+              </button>
 
               {/* Developer Logs Terminal */}
               <div className="settings-group" style={{ marginTop: '16px' }}>
                 <label className="settings-label">{t.devLogsTitle}</label>
                 <div className="dev-terminal">
                   <div className="terminal-header">
-                    <span className="terminal-title">🟢 uvicorn@127.0.0.1:8000 (~/app/storage/logs/backend.log)</span>
+                    <span className="terminal-title">🟢 uvicorn@{API.replace('http://', '').replace('https://', '')} (~/app/storage/logs/backend.log)</span>
                     <div className="terminal-controls">
                       <button
                         type="button"

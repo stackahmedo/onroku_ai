@@ -47,6 +47,11 @@ class DatabaseService:
                     error_message    TEXT
                 )
             """)
+            # Dynamic migration for file_size_bytes
+            try:
+                conn.execute("ALTER TABLE jobs ADD COLUMN file_size_bytes INTEGER")
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
         logger.info("Database initialised")
 
@@ -59,6 +64,7 @@ class DatabaseService:
         model_name: Optional[str] = None,
         language: str = "ja",
         duration_seconds: Optional[float] = None,
+        file_size_bytes: Optional[int] = None,
     ) -> str:
         job_id = str(uuid.uuid4())
         now = datetime.now().isoformat()
@@ -67,11 +73,11 @@ class DatabaseService:
                 """
                 INSERT INTO jobs
                     (id, file_id, filename, file_path, status, hardware_tier,
-                     model_name, language, duration_seconds, created_at, updated_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                     model_name, language, duration_seconds, file_size_bytes, created_at, updated_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
                 """,
                 (job_id, file_id, filename, file_path, "pending",
-                 hardware_tier, model_name, language, duration_seconds, now, now),
+                 hardware_tier, model_name, language, duration_seconds, file_size_bytes, now, now),
             )
             conn.commit()
         logger.info(f"Job created: {job_id}")
@@ -110,6 +116,15 @@ class DatabaseService:
             conn.execute(
                 "UPDATE jobs SET language=?, updated_at=? WHERE id=?",
                 (language, now, job_id),
+            )
+            conn.commit()
+
+    def update_job_size(self, job_id: str, file_size_bytes: int):
+        now = datetime.now().isoformat()
+        with self._conn() as conn:
+            conn.execute(
+                "UPDATE jobs SET file_size_bytes=?, updated_at=? WHERE id=?",
+                (file_size_bytes, now, job_id),
             )
             conn.commit()
 

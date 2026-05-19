@@ -1,0 +1,5 @@
+{
+  "transcript_export_dir": "C:\\TestTranscripts",
+  "pdf_max_chars_per_page": 1000,
+  "pdf_template": "compact_terminal"
+}

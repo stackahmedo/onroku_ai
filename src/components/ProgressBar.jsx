@@ -1,12 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
 
-const API = 'http://127.0.0.1:8000';
+const getApiUrl = () => {
+  const saved = localStorage.getItem('api_url');
+  if (saved && saved.trim() !== '') {
+    return saved.trim();
+  }
+  const hostname = window.location.hostname || '127.0.0.1';
+  const protocol = window.location.protocol === 'file:' ? 'http:' : (window.location.protocol || 'http:');
+  return `${protocol}//${hostname}:8000`;
+};
+const API = getApiUrl();
 
-export default function ProgressBar({ jobId, status, initialPct = 0, initialLabel = '' }) {
+export default function ProgressBar({ jobId, status, initialPct = 0, initialLabel = '', fileSize: initialFileSize = 0, duration: initialDuration = null }) {
   const [pct, setPct]           = useState(initialPct);
   const [label, setLabel]       = useState(initialLabel);
   const [elapsed, setElapsed]   = useState(0);
-  const [duration, setDuration] = useState(null);
+  const [duration, setDuration] = useState(initialDuration);
+  const [fileSize, setFileSize] = useState(initialFileSize);
   const esRef = useRef(null);
 
   useEffect(() => {
@@ -30,6 +40,9 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
         }
         if (data.duration_seconds !== undefined && data.duration_seconds !== null) {
           setDuration(data.duration_seconds);
+        }
+        if (data.file_size_bytes !== undefined && data.file_size_bytes !== null) {
+          setFileSize(data.file_size_bytes);
         }
       } catch {}
     });
@@ -94,14 +107,25 @@ export default function ProgressBar({ jobId, status, initialPct = 0, initialLabe
       <div className="progress-meta">
         <div className="progress-left-side">
           <span className="progress-pct">{pct}%</span>
+          {fileSize > 0 && (
+            <span className="progress-size" style={{ fontSize: '11px', color: 'var(--clr-text-muted)', marginLeft: '8px' }}>
+              📦 {(fileSize / 1024 / 1024).toFixed(1)} MB
+            </span>
+          )}
+          {duration > 0 && (
+            <span className="progress-dur" style={{ fontSize: '11px', color: 'var(--clr-text-muted)', marginLeft: '8px' }}>
+              ⏱️ {formatTime(duration)}
+            </span>
+          )}
           {isActive && (
-            <span className="progress-timer">
-              ⏱️ {formatTime(elapsed)}
+            <span className="progress-timer" style={{ marginLeft: '8px' }}>
+              ({formatTime(elapsed)}
               {remaining !== null && (
                 <span className="progress-eta">
-                  {' · '}Remaining: ~{formatTime(remaining)}
+                  {' · '}~{formatTime(remaining)}
                 </span>
               )}
+              )
             </span>
           )}
         </div>

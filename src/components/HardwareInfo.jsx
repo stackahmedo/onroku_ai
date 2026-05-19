@@ -1,6 +1,15 @@
 import React, { useEffect, useState } from 'react';
 
-const API = 'http://127.0.0.1:8000';
+const getApiUrl = () => {
+  const saved = localStorage.getItem('api_url');
+  if (saved && saved.trim() !== '') {
+    return saved.trim();
+  }
+  const hostname = window.location.hostname || '127.0.0.1';
+  const protocol = window.location.protocol === 'file:' ? 'http:' : (window.location.protocol || 'http:');
+  return `${protocol}//${hostname}:8000`;
+};
+const API = getApiUrl();
 
 const TIER_ICONS  = { light: '🔴', medium: '🟡', heavy: '🟢' };
 const TIER_LABELS = { light: 'Light', medium: 'Medium', heavy: 'Heavy' };
@@ -9,6 +18,9 @@ export default function HardwareInfo({ t }) {
   const [hw, setHw] = useState(null);
 
   useEffect(() => {
+    let active = true;
+    let timer;
+
     const load = async () => {
       try {
         let data;
@@ -18,12 +30,22 @@ export default function HardwareInfo({ t }) {
           const res = await fetch(`${API}/hardware`);
           data = await res.json();
         }
-        setHw(data);
+        if (active && data) {
+          setHw(data);
+        }
       } catch (err) {
-        console.warn('Hardware info unavailable:', err);
+        console.warn('Hardware info unavailable, retrying in 3s:', err);
+        if (active) {
+          timer = setTimeout(load, 3000);
+        }
       }
     };
     load();
+
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, []);
 
   if (!hw) return (
@@ -49,23 +71,29 @@ export default function HardwareInfo({ t }) {
           <span className="hw-val">{hw.model_name}</span>
         </div>
         <div className="hw-item">
-          <span className="hw-key">{t.device}</span>
-          <span className="hw-val">{hw.device?.toUpperCase()}</span>
+          <span className="hw-key">{t.cpu || 'CPU'}</span>
+          <span className="hw-val" title={hw.cpu_name}>{hw.cpu_name}</span>
+        </div>
+        <div className="hw-item">
+          <span className="hw-key">{t.gpu || 'GPU'}</span>
+          <span className={`hw-val ${hw.gpu_available ? 'hw-val--gpu' : ''}`}>
+            {hw.gpu_name
+              ? `${hw.gpu_name}${hw.gpu_vram_gb ? ` (${hw.gpu_vram_gb} GB)` : ''}`
+              : 'None / Not Detected'}
+          </span>
         </div>
         <div className="hw-item">
           <span className="hw-key">{t.ram}</span>
           <span className="hw-val">{hw.ram_gb} GB</span>
         </div>
         <div className="hw-item">
+          <span className="hw-key">{t.device}</span>
+          <span className="hw-val">{hw.device?.toUpperCase()}</span>
+        </div>
+        <div className="hw-item">
           <span className="hw-key">{t.chunkSize}</span>
           <span className="hw-val">{chunkMin} {t.minutes}</span>
         </div>
-        {hw.gpu_available && hw.gpu_name && (
-          <div className="hw-item">
-            <span className="hw-key">{t.gpu}</span>
-            <span className="hw-val hw-val--gpu">{hw.gpu_name} ({hw.gpu_vram_gb} GB)</span>
-          </div>
-        )}
       </div>
     </div>
   );

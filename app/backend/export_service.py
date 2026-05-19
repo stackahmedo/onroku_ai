@@ -163,7 +163,387 @@ def export_excel(segments: List[Dict], export_path: Path) -> Path:
     return export_path
 
 
-def export_transcript(transcript_path: str, format: str, export_dir: Path) -> str:
+def export_pdf(segments: List[Dict], export_path: Path, max_chars_per_page: int = 1000, pdf_template: str = "corporate") -> Path:
+    """Export formatted A4 PDF transcript using ReportLab, dynamically styled by the selected template."""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Table, TableStyle
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib import colors
+        from reportlab.pdfbase import pdfmetrics
+        from reportlab.pdfbase.ttfonts import TTFont
+        import os
+    except ImportError:
+        logger.error("ReportLab library not available for PDF export")
+        raise RuntimeError("ReportLab library not installed. PDF export is not supported.")
+
+    export_path = Path(export_path).with_suffix(".pdf")
+
+    # 1. Register a standard Windows Japanese TrueType font
+    japanese_font_name = "Helvetica"
+    font_registered = False
+
+    font_paths = [
+        r"C:\Windows\Fonts\yugothm.ttc",
+        r"C:\Windows\Fonts\msgothic.ttc",
+        r"C:\Windows\Fonts\meiryo.ttc",
+        r"C:\Windows\Fonts\msmincho.ttc",
+    ]
+
+    for fp in font_paths:
+        if os.path.exists(fp):
+            try:
+                pdfmetrics.registerFont(TTFont("JapaneseFont", fp))
+                japanese_font_name = "JapaneseFont"
+                font_registered = True
+                logger.info(f"Registered Japanese TTF font: {fp}")
+                break
+            except Exception as e:
+                logger.warning(f"Failed to register TTF font {fp}: {e}")
+
+    if not font_registered:
+        # Fall back to ReportLab CJK built-in CID Font
+        try:
+            from reportlab.pdfbase.cidfonts import CIDFont
+            pdfmetrics.registerFont(CIDFont('HeiseiMin-W3'))
+            japanese_font_name = 'HeiseiMin-W3'
+            font_registered = True
+            logger.info("Registered Japanese CID standard font: HeiseiMin-W3")
+        except Exception as e:
+            logger.warning(f"Failed to register CJK CID font: {e}")
+
+    # Resolve selected template options (10 Premium Templates)
+    t_opt = {
+        "primary_bg": colors.HexColor("#1e3a5f"),
+        "primary_text": colors.white,
+        "row_alt_bg": colors.HexColor("#f8fafc"),
+        "row_base_bg": colors.white,
+        "title_color": colors.HexColor("#1e3a5f"),
+        "grid_color": colors.HexColor("#cbd5e1"),
+        "text_color": colors.HexColor("#1e293b"),
+        "font": japanese_font_name,
+        "margin_lr": 24,
+        "margin_tb": 36,
+        "padding": 3,
+        "fontSize": 8,
+        "leading": 11,
+        "grid_width": 0.5,
+        "no_grid_vertical": False,
+        "meta_text_color": colors.HexColor("#64748b"),
+        "line_color": colors.HexColor("#e2e8f0"),
+        "banner_text": "SmartGrid Transcript AI - Corporate Slate Report"
+    }
+
+    if pdf_template == "eco":
+        t_opt.update({
+            "primary_bg": colors.white,
+            "primary_text": colors.black,
+            "row_alt_bg": colors.white,
+            "title_color": colors.black,
+            "grid_color": colors.HexColor("#475569"),
+            "text_color": colors.black,
+            "padding": 2,
+            "banner_text": "SmartGrid Transcript AI - Eco-Friendly Minimalist Report"
+        })
+    elif pdf_template == "cyberpunk":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#090d16"),
+            "primary_text": colors.HexColor("#06b6d4"),
+            "row_alt_bg": colors.HexColor("#111827"),
+            "row_base_bg": colors.HexColor("#030712"),
+            "title_color": colors.HexColor("#06b6d4"),
+            "grid_color": colors.HexColor("#14b8a6"),
+            "text_color": colors.HexColor("#e2e8f0"),
+            "meta_text_color": colors.HexColor("#0d9488"),
+            "line_color": colors.HexColor("#14b8a6"),
+            "padding": 3.5,
+            "banner_text": "SmartGrid Transcript AI - Cyberpunk Tech Obsidian Report"
+        })
+    elif pdf_template == "emerald":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#064e3b"),
+            "primary_text": colors.white,
+            "row_alt_bg": colors.HexColor("#f0fdf4"),
+            "title_color": colors.HexColor("#064e3b"),
+            "grid_color": colors.HexColor("#a7f3d0"),
+            "banner_text": "SmartGrid Transcript AI - Royal Emerald Report"
+        })
+    elif pdf_template == "amber":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#78350f"),
+            "primary_text": colors.HexColor("#fef3c7"),
+            "row_alt_bg": colors.HexColor("#fffbeb"),
+            "title_color": colors.HexColor("#78350f"),
+            "grid_color": colors.HexColor("#fde68a"),
+            "banner_text": "SmartGrid Transcript AI - Warm Amber Editorial Report"
+        })
+    elif pdf_template == "serif_court":
+        t_opt.update({
+            "primary_bg": colors.white,
+            "primary_text": colors.black,
+            "row_alt_bg": colors.white,
+            "title_color": colors.black,
+            "grid_color": colors.black,
+            "text_color": colors.black,
+            "margin_lr": 36,
+            "margin_tb": 54,
+            "padding": 4.5,
+            "grid_width": 0.75,
+            "no_grid_vertical": True,
+            "banner_text": "SmartGrid Transcript AI - Formal Court Serif Report"
+        })
+    elif pdf_template == "cherry_blossom":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#be185d"),
+            "primary_text": colors.white,
+            "row_alt_bg": colors.HexColor("#fdf2f8"),
+            "title_color": colors.HexColor("#be185d"),
+            "grid_color": colors.HexColor("#fbcfe8"),
+            "banner_text": "SmartGrid Transcript AI - Cherry Blossom Sakura Report"
+        })
+    elif pdf_template == "crimson":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#881337"),
+            "primary_text": colors.white,
+            "row_alt_bg": colors.HexColor("#fff1f2"),
+            "title_color": colors.HexColor("#881337"),
+            "grid_color": colors.HexColor("#fecdd3"),
+            "banner_text": "SmartGrid Transcript AI - Executive Crimson Report"
+        })
+    elif pdf_template == "indigo":
+        t_opt.update({
+            "primary_bg": colors.HexColor("#4338ca"),
+            "primary_text": colors.white,
+            "row_alt_bg": colors.HexColor("#f5f3ff"),
+            "title_color": colors.HexColor("#4338ca"),
+            "grid_color": colors.HexColor("#ddd6fe"),
+            "banner_text": "SmartGrid Transcript AI - Modern Indigo Report"
+        })
+    elif pdf_template == "accessibility":
+        t_opt.update({
+            "primary_bg": colors.black,
+            "primary_text": colors.white,
+            "row_alt_bg": colors.white,
+            "title_color": colors.black,
+            "grid_color": colors.black,
+            "text_color": colors.black,
+            "margin_lr": 20,
+            "margin_tb": 28,
+            "padding": 5,
+            "fontSize": 9,
+            "leading": 13,
+            "grid_width": 1.0,
+            "banner_text": "SmartGrid Transcript AI - High-Contrast Accessible Report"
+        })
+    elif pdf_template == "compact_terminal":
+        t_opt.update({
+            "primary_bg": colors.white,
+            "primary_text": colors.black,
+            "row_alt_bg": colors.white,
+            "row_base_bg": colors.white,
+            "title_color": colors.black,
+            "grid_color": colors.HexColor("#7f8c8d"),
+            "text_color": colors.black,
+            "margin_lr": 18,
+            "margin_tb": 24,
+            "padding": 0.5,
+            "fontSize": 7.5,
+            "leading": 9.5,
+            "grid_width": 0.5,
+            "no_grid_vertical": False,
+            "meta_text_color": colors.HexColor("#7f8c8d"),
+            "line_color": colors.HexColor("#7f8c8d"),
+            "banner_text": "SmartGrid Transcript AI - Compact Terminal Grid"
+        })
+
+    # 2. Paginate segments based on max characters per page
+    pages_data = [[]]
+    curr_chars = 0
+    for seg in segments:
+        text = seg.get("text", "").strip()
+        seg_len = len(text)
+        if curr_chars + seg_len > max_chars_per_page and len(pages_data[-1]) > 0:
+            pages_data.append([])
+            curr_chars = 0
+        pages_data[-1].append(seg)
+        curr_chars += seg_len
+
+    # 3. Build document layout
+    doc = SimpleDocTemplate(
+        str(export_path),
+        pagesize=A4,
+        rightMargin=t_opt["margin_lr"],
+        leftMargin=t_opt["margin_lr"],
+        topMargin=t_opt["margin_tb"],
+        bottomMargin=t_opt["margin_tb"]
+    )
+
+    styles = getSampleStyleSheet()
+
+    # Dynamic Custom Paragraph Styles
+    title_style = ParagraphStyle(
+        'DocTitle',
+        parent=styles['Normal'],
+        fontName=t_opt["font"],
+        fontSize=13,
+        leading=16,
+        textColor=t_opt["title_color"],
+        spaceAfter=4,
+        alignment=1 # Center
+    )
+
+    meta_style = ParagraphStyle(
+        'MetaText',
+        parent=styles['Normal'],
+        fontName=t_opt["font"],
+        fontSize=8,
+        leading=10,
+        textColor=t_opt["meta_text_color"],
+        spaceAfter=4,
+        alignment=0 # Left
+    )
+
+    header_cell_style = ParagraphStyle(
+        'HeaderCell',
+        parent=styles['Normal'],
+        fontName=t_opt["font"],
+        fontSize=8.5,
+        leading=11,
+        textColor=t_opt["primary_text"],
+        alignment=1 # Center
+    )
+
+    body_cell_center = ParagraphStyle(
+        'BodyCellCenter',
+        parent=styles['Normal'],
+        fontName=t_opt["font"],
+        fontSize=t_opt["fontSize"],
+        leading=t_opt["leading"],
+        textColor=t_opt["text_color"],
+        alignment=1 # Center
+    )
+
+    body_cell_left = ParagraphStyle(
+        'BodyCellLeft',
+        parent=styles['Normal'],
+        fontName=t_opt["font"],
+        fontSize=t_opt["fontSize"],
+        leading=t_opt["leading"],
+        textColor=t_opt["text_color"],
+        alignment=0 # Left
+    )
+
+    story = []
+
+    # Title Banner
+    if pdf_template != "compact_terminal":
+        story.append(Paragraph("<b>文字起こしデータ書き出し / Transcript Export</b>", title_style))
+        story.append(Spacer(1, 4))
+
+    # Build story flow
+    for page_idx, page_segs in enumerate(pages_data):
+        if page_idx > 0:
+            story.append(PageBreak())
+
+        # Metadata banner on each page
+        if pdf_template != "compact_terminal":
+            story.append(Paragraph(
+                f"<b>ページ {page_idx + 1} / Page {page_idx + 1}</b> (最小文字数設定: {max_chars_per_page}文字 / Min Chars Per Page: {max_chars_per_page})",
+                meta_style
+            ))
+
+        # Build table
+        table_data = [[
+            Paragraph("<b>時間 / Time</b>", header_cell_style),
+            Paragraph("<b>話者 / Speaker</b>", header_cell_style),
+            Paragraph("<b>文字起こし / Transcript</b>", header_cell_style)
+        ]]
+
+        for seg in page_segs:
+            if pdf_template == "compact_terminal":
+                time_str = _fmt_time(seg.get("start", 0))
+            else:
+                time_str = _fmt_range(seg.get("start", 0), seg.get("end", 0))
+            speaker = seg.get("speaker", "Unknown")
+            if speaker.startswith("Speaker "):
+                speaker = speaker.replace("Speaker ", "話者")
+            text = seg.get("text", "").strip()
+
+            table_data.append([
+                Paragraph(time_str, body_cell_center),
+                Paragraph(speaker, body_cell_center),
+                Paragraph(text, body_cell_left)
+            ])
+
+        # Dynamic Columns adaptation to margin size
+        printable_width = 595.27 - (2 * t_opt["margin_lr"])
+        col_time = int(printable_width * 0.12)
+        col_spk = int(printable_width * 0.14)
+        col_txt = int(printable_width - col_time - col_spk)
+        col_widths = [col_time, col_spk, col_txt]
+
+        t = Table(table_data, colWidths=col_widths, repeatRows=1)
+
+        t_styles = [
+            ('BACKGROUND', (0,0), (-1,0), t_opt["primary_bg"]),
+            ('ALIGN', (0,0), (-1,-1), 'CENTER'),
+            ('VALIGN', (0,0), (-1,-1), 'TOP'),
+            ('BOTTOMPADDING', (0,0), (-1,-1), t_opt["padding"]),
+            ('TOPPADDING', (0,0), (-1,-1), t_opt["padding"]),
+        ]
+
+        if pdf_template == "compact_terminal":
+            t_styles.extend([
+                ('LINEAFTER', (0, 0), (0, -1), t_opt["grid_width"], t_opt["grid_color"]),
+                ('LINEAFTER', (1, 0), (1, -1), t_opt["grid_width"], t_opt["grid_color"]),
+                ('LINEBELOW', (0, 0), (-1, 0), t_opt["grid_width"], t_opt["grid_color"]),
+            ])
+        elif t_opt["no_grid_vertical"]:
+            t_styles.extend([
+                ('LINEABOVE', (0,0), (-1,0), t_opt["grid_width"], t_opt["grid_color"]),
+                ('LINEBELOW', (0,0), (-1,0), t_opt["grid_width"], t_opt["grid_color"]),
+                ('LINEBELOW', (0,-1), (-1,-1), t_opt["grid_width"], t_opt["grid_color"]),
+            ])
+        else:
+            t_styles.append(('GRID', (0,0), (-1,-1), t_opt["grid_width"], t_opt["grid_color"]))
+
+        # Alternating row colors
+        for row_idx in range(1, len(table_data)):
+            bg = t_opt["row_alt_bg"] if row_idx % 2 == 0 else t_opt["row_base_bg"]
+            t_styles.append(('BACKGROUND', (0, row_idx), (-1, row_idx), bg))
+
+        t.setStyle(TableStyle(t_styles))
+        story.append(t)
+
+    # 4. Built doc decorator callbacks
+    def add_page_decorations(canvas, doc):
+        if pdf_template == "compact_terminal":
+            return
+        canvas.saveState()
+        canvas.setFont(t_opt["font"], 8)
+        canvas.setFillColor(t_opt["meta_text_color"])
+
+        # Calculate horizontal positions dynamically
+        margin = t_opt["margin_lr"]
+        width_end = 595.27 - margin
+
+        # Top page header line
+        canvas.drawString(margin, 841.89 - margin + 12, t_opt["banner_text"])
+        canvas.setStrokeColor(t_opt["line_color"])
+        canvas.setLineWidth(0.5)
+        canvas.line(margin, 841.89 - margin + 6, width_end, 841.89 - margin + 6)
+
+        # Bottom page footer line
+        canvas.drawString(margin, 15, "Transcript AI V2 (Space-Optimized Compact Printing)")
+        canvas.drawRightString(width_end, 15, f"ページ {doc.page} / Page {doc.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=add_page_decorations, onLaterPages=add_page_decorations)
+    logger.info(f"PDF exported: {export_path} using template {pdf_template}")
+    return export_path
+
+
+def export_transcript(transcript_path: str, format: str, export_dir: Path, max_chars_per_page: int = 1000, pdf_template: str = "corporate") -> str:
     """Load JSON segments and export in the requested format."""
     with open(transcript_path, "r", encoding="utf-8") as f:
         segments = json.load(f)
@@ -177,6 +557,8 @@ def export_transcript(transcript_path: str, format: str, export_dir: Path) -> st
         out = export_csv(segments, base_path)
     elif format == "excel":
         out = export_excel(segments, base_path)
+    elif format == "pdf":
+        out = export_pdf(segments, base_path, max_chars_per_page, pdf_template)
     else:
         raise ValueError(f"Unknown export format: {format}")
 

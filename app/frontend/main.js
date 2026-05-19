@@ -7,6 +7,7 @@ const { app, BrowserWindow, Menu, ipcMain, dialog, shell } = require('electron')
 const path  = require('path');
 const fs    = require('fs');
 const http  = require('http');
+const { pathToFileURL } = require('url');
 
 let mainWindow;
 const API_URL = 'http://127.0.0.1:8000';
@@ -26,17 +27,24 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       preload: path.join(__dirname, 'preload.js'),
+      plugins: true,
     },
     icon: path.join(__dirname, '../../public/icon.png'),
   });
 
   const startUrl = isDev
     ? 'http://localhost:3000'
-    : `file://${path.join(__dirname, '../../build/index.html')}`;
+    : pathToFileURL(path.join(__dirname, '../../build/index.html')).href;
 
   mainWindow.loadURL(startUrl);
 
-  if (isDev) mainWindow.webContents.openDevTools({ mode: 'right' });
+  if (isDev) {
+    mainWindow.webContents.openDevTools({ mode: 'right' });
+  }
+
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    console.log(`[Electron Console] [Level ${level}] ${message} (Source: ${sourceId}:${line})`);
+  });
 
   mainWindow.on('closed', () => { mainWindow = null; });
 }
@@ -79,6 +87,30 @@ function nodeFetch(url, options = {}) {
     req.end();
   });
 }
+
+// ── IPC: Window Controls ───────────────────────────────────
+ipcMain.handle('win:minimize', () => {
+  if (mainWindow) mainWindow.minimize();
+});
+ipcMain.handle('win:maximize', () => {
+  if (mainWindow) {
+    if (mainWindow.isMaximized()) {
+      mainWindow.unmaximize();
+    } else {
+      mainWindow.maximize();
+    }
+  }
+});
+ipcMain.handle('win:close', () => {
+  if (mainWindow) mainWindow.close();
+});
+ipcMain.handle('win:reload', () => {
+  if (mainWindow) mainWindow.webContents.reload();
+});
+ipcMain.handle('win:restart', () => {
+  app.relaunch();
+  app.exit(0);
+});
 
 // ── IPC: API ───────────────────────────────────────────────
 
@@ -270,9 +302,9 @@ function buildMenu() {
           label: 'About / このアプリについて',
           click: () => dialog.showMessageBox(mainWindow, {
             type: 'info',
-            title: 'Transcript AI V2',
-            message: 'Transcript AI V2',
-            detail: 'Offline Multi-Speaker Transcription\nPowered by faster-whisper & Pyannote',
+            title: 'Onroku AI',
+            message: 'Onroku AI V5.5',
+            detail: 'Offline Multi-Speaker Transcription V5.5\nPowered by faster-whisper & Pyannote',
           }),
         },
         {

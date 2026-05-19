@@ -1,7 +1,16 @@
 import React, { useState } from 'react';
 import ProgressBar from './ProgressBar';
 
-const API = 'http://127.0.0.1:8000';
+const getApiUrl = () => {
+  const saved = localStorage.getItem('api_url');
+  if (saved && saved.trim() !== '') {
+    return saved.trim();
+  }
+  const hostname = window.location.hostname || '127.0.0.1';
+  const protocol = window.location.protocol || 'http:';
+  return `${protocol}//${hostname}:8000`;
+};
+const API = getApiUrl();
 
 const STATUS_COLORS = {
   pending:       '#94a3b8',
@@ -223,12 +232,28 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
       </div>
 
       {/* Meta */}
-      <div className="job-card__meta">
-        <span>{createdAt}</span>
-        {job.hardware_tier && (
-          <span className="job-card__tier-badge">{job.hardware_tier}</span>
-        )}
-        {job.model_name && <span>·  {job.model_name}</span>}
+      <div className="job-card__meta" style={{ display: 'flex', flexDirection: 'column', gap: '4px', alignItems: 'flex-start' }}>
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+          <span>{createdAt}</span>
+          {job.hardware_tier && (
+            <span className="job-card__tier-badge">{job.hardware_tier}</span>
+          )}
+          {job.model_name && <span>· {job.model_name}</span>}
+        </div>
+        {/* Source File stats (Size, Duration, and filename) */}
+        <div style={{ display: 'flex', gap: '8px', alignItems: 'center', fontSize: '11px', color: 'var(--clr-text-muted)', marginTop: '2px', flexWrap: 'wrap' }}>
+          {job.file_size_bytes > 0 && (
+            <span>📦 {(job.file_size_bytes / 1024 / 1024).toFixed(1)} MB</span>
+          )}
+          {job.duration_seconds > 0 && (
+            <span>⏱️ {formatDuration(job.duration_seconds)}</span>
+          )}
+          {job.file_path && (
+            <span style={{ maxWidth: '350px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={job.file_path}>
+              📁 {job.file_path.split('\\').pop().split('/').pop()}
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Stats */}
@@ -250,6 +275,8 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
           status={job.status}
           initialPct={job.progress_pct || 0}
           initialLabel={job.progress_label || ''}
+          fileSize={job.file_size_bytes}
+          duration={job.duration_seconds}
         />
       )}
 
@@ -385,6 +412,12 @@ export default function JobCard({ job, t, onDeleted, onCancelled, onStatusChange
               onClick={() => handleExport('excel')}
               disabled={exporting}
             >📗 {t.exportExcel}</button>
+            <button
+              id={`export-pdf-${job.id.substring(0,8)}`}
+              className="btn btn-export btn-pdf"
+              onClick={() => handleExport('pdf')}
+              disabled={exporting}
+            >📕 {t.exportPdf || 'PDF'}</button>
           </>
         )}
         {isActive && (

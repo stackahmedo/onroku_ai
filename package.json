@@ -1,7 +1,7 @@
 {
-  "name": "transcript-ai-v2",
-  "version": "2.0.0",
-  "description": "Offline multi-speaker Japanese transcription — Electron + React + FastAPI",
+  "name": "onroku-ai",
+  "version": "5.5.0",
+  "description": "Onroku AI — Offline multi-speaker Japanese transcription",
   "main": "app/frontend/main.js",
   "homepage": "./",
   "author": "Transcript AI Team",
@@ -36,7 +36,7 @@
   },
   "build": {
     "appId": "com.transcriptai.v2",
-    "productName": "Transcript AI V2",
+    "productName": "Onroku AI",
     "files": [
       "build/**/*",
       "app/frontend/main.js",

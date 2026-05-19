@@ -3,7 +3,7 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 echo ============================================
-echo  Transcript AI V2 -- Production Launcher
+echo  Onroku AI V5.5 -- Production Launcher
 echo ============================================
 
 REM Check Python
@@ -87,7 +87,7 @@ for /f "tokens=5" %%a in ('netstat -ano 2^>nul ^| findstr ":8000.*LISTENING"') d
 ping 127.0.0.1 -n 2 >nul
 
 echo.
-echo Starting Transcript AI V2 (Offline Mode)...
+echo Starting Onroku AI V5.5 (Offline Mode)...
 echo (Close this window or press Ctrl+C to stop)
 echo.
 "%CHOSEN_PYTHON%" "%~dp0launcher.py" --prod

@@ -82,6 +82,35 @@ class TranscriptionService:
         self.chunk_seconds = hw["chunk_seconds"]
         self.threads = hw["threads"]
 
+        # ── Hybrid Engine Setup ─────────────────────────────
+        import platform
+        bin_dir = Path(__file__).parent.parent.parent / "app" / "bin"
+        bin_dir.mkdir(parents=True, exist_ok=True)
+        
+        binary_name = "whisper-cli.exe" if platform.system() == "Windows" else "whisper-cli"
+        self.whisper_cpp_path = bin_dir / binary_name
+        
+        recommended_engine = hw.get("engine", "faster-whisper")
+        
+        if recommended_engine == "whisper.cpp":
+            if self.whisper_cpp_path.exists():
+                self.engine = "whisper.cpp"
+                logger.info(f"Hybrid Engine: Found whisper.cpp binary at {self.whisper_cpp_path}. Utilizing Vulkan/CoreML GPU path.")
+            else:
+                self.engine = "faster-whisper"
+                self.device = "cpu"
+                self.compute_type = "int8"
+                logger.warning(
+                    f"Hybrid Engine: Recommended engine is whisper.cpp (for AMD/Intel GPU or Apple Silicon), "
+                    f"but no binary was found at {self.whisper_cpp_path}."
+                )
+                logger.warning("To enable AMD Radeon GPU (Vulkan) or macOS (Metal) acceleration:")
+                logger.warning(f"  1. Download a precompiled 'whisper-cli' executable for your system.")
+                logger.warning(f"  2. Place it exactly at: {self.whisper_cpp_path}")
+                logger.warning("Gracefully falling back to CPU execution (faster-whisper INT8)...")
+        else:
+            self.engine = "faster-whisper"
+
         # Lazy-loaded models (loaded once on first use)
         self._whisper_model = None
         self._current_whisper_model_name = None
@@ -122,6 +151,164 @@ class TranscriptionService:
         )
         self._current_whisper_model_name = target_model
         logger.info("Whisper model loaded")
+
+    def _download_ggml_model(self, model_name: str, progress_cb: Optional[Callable] = None) -> str:
+        """Download GGML model from Hugging Face if not present."""
+        ggml_dir = Path(__file__).parent.parent.parent / "app" / "models" / "ggml"
+        ggml_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Map target model name to GGML filename
+        # e.g. "large-v3" -> "ggml-large-v3.bin", "small" -> "ggml-small.bin"
+        model_filename = f"ggml-{model_name}.bin"
+        model_path = ggml_dir / model_filename
+        
+        if model_path.exists():
+            logger.info(f"GGML model already exists: {model_path}")
+            return str(model_path)
+            
+        url = f"https://huggingface.co/ggerganov/whisper.cpp/resolve/main/{model_filename}"
+        logger.info(f"Downloading GGML model from {url} to {model_path}...")
+        
+        import requests
+        
+        _progress(progress_cb, 8, f"AIモデル({model_name})ダウンロード中... / Downloading AI model ({model_name})...")
+        
+        response = requests.get(url, stream=True)
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to download GGML model: HTTP {response.status_code}")
+            
+        total_size = int(response.headers.get("content-length", 0))
+        downloaded = 0
+        
+        with open(model_path, "wb") as f:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0 and progress_cb:
+                        pct = 8 + int(15 * (downloaded / total_size)) # Use 8% - 23% for download progress
+                        _progress(progress_cb, pct, f"AIモデル({model_name})ダウンロード中 ({downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB)...")
+                        
+        logger.info(f"GGML model successfully downloaded: {model_path}")
+        return str(model_path)
+
+    def _transcribe_chunk_whisper_cpp(
+        self,
+        chunk_path: str,
+        model_path: str,
+        language: str,
+        offset: float,
+        total_duration: float,
+        progress_cb: Optional[Callable[[int, str], None]] = None,
+        chunk_idx: int = 0,
+        n_chunks: int = 1,
+        job_id: str = "",
+        on_language_detected: Optional[Callable[[str], None]] = None,
+    ) -> List[Dict]:
+        """Transcribe a single WAV chunk with whisper.cpp executable."""
+        import tempfile
+        import json
+        import subprocess
+        
+        # If language is 'auto', we pass 'auto' to let Whisper auto-detect
+        active_lang = "auto" if language == "auto" else language
+        
+        segments_out = []
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                json_prefix = Path(tmpdir) / "output"
+                
+                cmd = [
+                    str(self.whisper_cpp_path),
+                    "-m", model_path,
+                    "-f", chunk_path,
+                    "-oj",
+                    "-of", str(json_prefix),
+                    "-t", str(self.threads),
+                    "-sow",  # Split on word for precise word-timestamps
+                ]
+                if active_lang and active_lang != "auto":
+                    cmd.extend(["-l", active_lang])
+                else:
+                    cmd.extend(["-l", "auto"])
+                
+                logger.info(f"Running whisper.cpp command: {' '.join(cmd)}")
+                
+                # Execute whisper.cpp
+                # We hide the window on Windows using creationflags
+                kwargs = {}
+                if os.name == "nt":
+                    kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+                
+                # We capture standard error to log it in case of failure
+                result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+                
+                if result.returncode != 0:
+                    logger.error(f"whisper.cpp process failed with code {result.returncode}:\n{result.stderr}")
+                    return []
+                
+                json_file = Path(tmpdir) / "output.json"
+                if not json_file.exists():
+                    logger.error(f"whisper.cpp JSON output file not found at {json_file}")
+                    return []
+                
+                with open(json_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                
+                # Parse output segments
+                transcription = data.get("transcription", [])
+                
+                # If this is the first chunk and language callback is provided, extract detected language
+                if on_language_detected:
+                    detected_lang = data.get("result", {}).get("language", "ja")
+                    try:
+                        on_language_detected(detected_lang)
+                    except Exception as e:
+                        logger.warning(f"Failed to call on_language_detected: {e}")
+                
+                for seg in transcription:
+                    check_pause_cancel(job_id)
+                    
+                    # Convert offsets (milliseconds) to seconds (float)
+                    seg_start = round(float(seg["offsets"]["from"]) / 1000.0 + offset, 3)
+                    seg_end = round(float(seg["offsets"]["to"]) / 1000.0 + offset, 3)
+                    seg_text = seg["text"].strip()
+                    
+                    words_list = []
+                    for w in seg.get("tokens", []):
+                        # Skip special tokens or empty text tokens
+                        w_text = w.get("text", "").strip()
+                        if not w_text or w_text.startswith("[") or w_text.startswith("("):
+                            continue
+                        w_start = round(float(w["offsets"]["from"]) / 1000.0 + offset, 3)
+                        w_end = round(float(w["offsets"]["to"]) / 1000.0 + offset, 3)
+                        words_list.append({
+                            "start": w_start,
+                            "end": w_end,
+                            "text": w_text,
+                        })
+                    
+                    segments_out.append({
+                        "start": seg_start,
+                        "end": seg_end,
+                        "speaker": "Speaker 1",
+                        "text": seg_text,
+                        "words": words_list,
+                    })
+                    
+                    if total_duration > 0 and progress_cb:
+                        processed_secs = min(offset + (float(seg["offsets"]["to"]) / 1000.0), total_duration)
+                        pct = 10 + int(70 * (processed_secs / total_duration))
+                        pct = min(pct, 79)
+                        _progress(
+                            progress_cb, pct,
+                            f"文字起こし中 {chunk_idx+1}/{n_chunks}... / Transcribing chunk {chunk_idx+1}/{n_chunks}..."
+                        )
+                        
+        except Exception as e:
+            logger.error(f"whisper.cpp chunk transcription error: {e}")
+            
+        return segments_out
 
     # ── Pyannote pipeline ────────────────────────────────────
 
@@ -164,7 +351,19 @@ class TranscriptionService:
             if device.type == "cpu":
                 # For maximum multi-core PyTorch CPU execution
                 torch.set_num_threads(self.hw["cpu_cores"])
+            
             self._pyannote_pipeline.to(device)
+
+            # Optimize embedding batch size for maximum processing speed
+            try:
+                if device.type == "cuda":
+                    self._pyannote_pipeline.embedding_batch_size = 16
+                else:
+                    self._pyannote_pipeline.embedding_batch_size = 1
+                logger.info(f"Configured Pyannote embedding_batch_size = {self._pyannote_pipeline.embedding_batch_size}")
+            except Exception as e:
+                logger.warning(f"Could not set Pyannote embedding_batch_size: {e}")
+
             logger.info("Pyannote pipeline loaded")
             return True
         except Exception as e:
@@ -365,9 +564,14 @@ class TranscriptionService:
                 raise InterruptedError("Job cancelled")
 
             check_pause_cancel(job_id)
-            # ── Step 2.5: Load Whisper model ───────────────
-            _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
-            self._load_whisper(model_name)
+            # ── Step 2.5: Load / Downloader Whisper model ────────
+            active_model = model_name if model_name else self.model_name
+            if self.engine == "whisper.cpp":
+                _progress(progress_cb, 8, "モデル確認中... / Checking AI model...")
+                model_path = self._download_ggml_model(active_model, progress_cb)
+            else:
+                _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
+                self._load_whisper(model_name)
 
             check_pause_cancel(job_id)
             if is_cancelled(job_id):
@@ -387,17 +591,31 @@ class TranscriptionService:
                     f"文字起こし中 {i+1}/{n_chunks}... / Transcribing chunk {i+1}/{n_chunks}..."
                 )
 
-                segs = self._transcribe_chunk(
-                    chunk_path=chunk_path,
-                    language=language,
-                    offset=offset,
-                    total_duration=duration,
-                    progress_cb=progress_cb,
-                    chunk_idx=i,
-                    n_chunks=n_chunks,
-                    job_id=job_id,
-                    on_language_detected=on_language_detected if i == 0 else None,
-                )
+                if self.engine == "whisper.cpp":
+                    segs = self._transcribe_chunk_whisper_cpp(
+                        chunk_path=chunk_path,
+                        model_path=model_path,
+                        language=language,
+                        offset=offset,
+                        total_duration=duration,
+                        progress_cb=progress_cb,
+                        chunk_idx=i,
+                        n_chunks=n_chunks,
+                        job_id=job_id,
+                        on_language_detected=on_language_detected if i == 0 else None,
+                    )
+                else:
+                    segs = self._transcribe_chunk(
+                        chunk_path=chunk_path,
+                        language=language,
+                        offset=offset,
+                        total_duration=duration,
+                        progress_cb=progress_cb,
+                        chunk_idx=i,
+                        n_chunks=n_chunks,
+                        job_id=job_id,
+                        on_language_detected=on_language_detected if i == 0 else None,
+                    )
                 all_segments.extend(segs)
                 logger.info(f"Chunk {i+1}/{n_chunks}: {len(segs)} segments")
 
