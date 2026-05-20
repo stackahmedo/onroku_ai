@@ -119,6 +119,9 @@ class TranscriptionService:
 
         normalized = str(model_name).lower()
 
+        if "sensevoice" in normalized or "qwen" in normalized:
+            return model_name
+
         if self.engine == "whisper.cpp":
             forced = None
             if normalized.endswith("-q5_0"):
