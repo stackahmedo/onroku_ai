@@ -10,6 +10,7 @@ WhisperCppEngine = None
 QwenEngine = None
 PyannoteDiarizationEngine = None
 SherpaDiarizationEngine = None
+SenseVoiceEngine = None
 
 try:
     from .whisper import WhisperEngine
@@ -50,3 +51,11 @@ except Exception as e:
     import logging
     logging.getLogger(__name__).warning(f"Sherpa engine import failed: {e}")
     ENGINE_STATUS["sherpa"] = {"available": False, "error": str(e)}
+
+try:
+    from .sensevoice import SenseVoiceEngine
+    ENGINE_STATUS["sensevoice"] = {"available": True, "error": None}
+except Exception as e:
+    import logging
+    logging.getLogger(__name__).warning(f"SenseVoice engine import failed: {e}")
+    ENGINE_STATUS["sensevoice"] = {"available": False, "error": str(e)}

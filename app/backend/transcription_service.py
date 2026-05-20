@@ -39,6 +39,7 @@ from engines import (
     QwenEngine,
     PyannoteDiarizationEngine,
     SherpaDiarizationEngine,
+    SenseVoiceEngine,
 )
 
 
@@ -72,6 +73,9 @@ class TranscriptionService:
                 self.engine = "faster-whisper"
                 self.device = "cpu"
                 self.compute_type = "int8"
+                hw["engine"] = self.engine
+                hw["device"] = self.device
+                hw["compute_type"] = self.compute_type
                 logger.warning(
                     f"Hybrid Engine: Recommended engine is whisper.cpp (for AMD/Intel GPU or Apple Silicon), "
                     f"but no binary was found at {self.whisper_cpp_path}."
@@ -83,12 +87,19 @@ class TranscriptionService:
         else:
             self.engine = "faster-whisper"
 
+        hw["runtime_asr_engine"] = self.engine
+        hw["runtime_asr_device"] = self.device
+        hw["runtime_compute_type"] = self.compute_type
+        hw["runtime_whisper_cpp_available"] = self.whisper_cpp_path.exists()
+        hw["runtime_whisper_cpp_path"] = str(self.whisper_cpp_path)
+
         # Instantiate modular engines
         self.whisper_engine = WhisperEngine(hw) if WhisperEngine else None
         self.whisper_cpp_engine = WhisperCppEngine(hw, self.whisper_cpp_path, self.threads) if WhisperCppEngine else None
         self.qwen_engine = QwenEngine(hw) if QwenEngine else None
         self.pyannote_engine = PyannoteDiarizationEngine(hw) if PyannoteDiarizationEngine else None
         self.sherpa_engine = SherpaDiarizationEngine(hw) if SherpaDiarizationEngine else None
+        self.sensevoice_engine = SenseVoiceEngine(hw) if SenseVoiceEngine else None
 
     def _ensure_engine(self, engine_name: str, instance):
         """Raise a descriptive error if the requested engine failed to import at startup."""
@@ -102,11 +113,41 @@ class TranscriptionService:
         return instance
 
     def _normalize_model_name_for_engine(self, model_name: Optional[str]) -> Optional[str]:
-        """Map whisper.cpp-only quantized names back to faster-whisper model ids when needed."""
-        if not model_name or self.engine == "whisper.cpp":
+        """Normalize requested model names for the active backend engine."""
+        if not model_name:
             return model_name
-        if isinstance(model_name, str) and model_name.endswith("-q5_0"):
-            return model_name[:-5]
+
+        normalized = str(model_name).lower()
+
+        if self.engine == "whisper.cpp":
+            forced = None
+            if normalized.endswith("-q5_0"):
+                forced = normalized
+            elif normalized in ("small", "base"):
+                forced = "small-q5_0"
+            elif normalized == "medium":
+                forced = "medium-q5_0"
+            elif "large" in normalized or "1.7b" in normalized:
+                forced = "medium-q5_0" if self.hw.get("ram_gb", 0.0) >= 16.0 else "small-q5_0"
+            else:
+                forced = "medium-q5_0" if self.hw.get("ram_gb", 0.0) >= 16.0 else "small-q5_0"
+
+            if forced != normalized:
+                logger.warning(
+                    f"Whisper.cpp runtime requires a GGML q5_0 model; mapping '{model_name}' to '{forced}'."
+                )
+            return forced
+
+        if self.engine == "faster-whisper" and normalized.endswith("-q5_0"):
+            return normalized[:-5]
+
+        if self.engine == "faster-whisper" and self.device == "cpu" and ("large" in normalized or "1.7b" in normalized):
+            fallback = "medium" if self.hw.get("ram_gb", 0.0) >= 16.0 else "small"
+            if fallback != normalized:
+                logger.warning(
+                    f"CPU execution is not optimal for '{model_name}'; falling back to '{fallback}' for speed and memory.")
+            return fallback
+
         return model_name
 
     # ── FFmpeg helpers ───────────────────────────────────────
@@ -174,21 +215,35 @@ class TranscriptionService:
         return "ffprobe"
 
     @staticmethod
-    def _ffmpeg_preprocess(input_path: str, output_path: str):
-        """Convert any audio/video to mono 16kHz WAV with noise reduction & amplitude normalization."""
+    def _ffmpeg_preprocess(input_path: str, output_path: str, performance_mode: str = "auto"):
+        """Convert any audio/video to mono 16kHz WAV with noise reduction & amplitude normalization based on performance mode."""
         ffmpeg = TranscriptionService._find_ffmpeg()
+        
+        # Optimize audio filter chain based on performance mode to speed up preprocessing
+        if performance_mode in ("eco", "fast"):
+            filter_chain = []
+        elif performance_mode == "balanced":
+            filter_chain = ["dynaudnorm=f=75:g=15"]
+        else:
+            filter_chain = ["afftdn", "loudnorm"]
+            
         cmd = [
             ffmpeg, "-y",
             "-threads", "0",
             "-i", input_path,
             "-vn",
-            "-af", "afftdn,loudnorm",
+        ]
+        
+        if filter_chain:
+            cmd.extend(["-af", ",".join(filter_chain)])
+            
+        cmd.extend([
             "-ac", "1",
             "-ar", "16000",
             "-acodec", "pcm_s16le",
             "-loglevel", "error",
             output_path,
-        ]
+        ])
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
             raise RuntimeError(f"FFmpeg preprocessing failed:\n{result.stderr[-2000:]}")
@@ -277,7 +332,7 @@ class TranscriptionService:
             # ── Step 1: Preprocess ─────────────────────────
             _progress(progress_cb, 2, "前処理中... / Preprocessing audio...")
             wav_path = str(tmp_dir / "audio.wav")
-            self._ffmpeg_preprocess(file_path, wav_path)
+            self._ffmpeg_preprocess(file_path, wav_path, performance_mode)
             duration = self._get_duration(wav_path)
             logger.info(f"Preprocessed: {duration:.1f}s")
 
@@ -295,6 +350,15 @@ class TranscriptionService:
             chunks_dir = tmp_dir / "chunks"
             
             active_chunk_secs = chunk_seconds if chunk_seconds is not None else self.chunk_seconds
+            if active_chunk_secs <= 0:
+                if duration > 180:
+                    active_chunk_secs = 30 if self.device == "cpu" else 60
+                elif duration > 90:
+                    active_chunk_secs = 30
+                else:
+                    active_chunk_secs = int(duration)
+                logger.info(f"Auto chunking for duration {duration:.1f}s: using {active_chunk_secs}s chunks")
+
             if active_chunk_secs <= 0 or active_chunk_secs >= duration:
                 chunks = [(wav_path, 0.0)]
                 n_chunks = 1
@@ -307,7 +371,7 @@ class TranscriptionService:
             if is_cancelled(job_id):
                 raise InterruptedError("Job cancelled")
 
-            check_pause_cancel(job_id)
+            check_pause_cancel(job_id, release_lock=True)
             
             # ── Step 2.5: Select and Load target Engine ────
             from hardware_detector import select_best_engine
@@ -317,8 +381,21 @@ class TranscriptionService:
             base_model = self._normalize_model_name_for_engine(base_model)
             
             # Apply performance profile settings
-            if performance_mode == "eco":
+            if "sensevoice" in base_model.lower():
+                active_model = "sensevoice"
+                beam_size = 1
+            elif performance_mode == "eco":
                 active_model = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
+                beam_size = 1
+            elif performance_mode == "fast":
+                if "qwen" in base_model.lower():
+                    active_model = "qwen3-asr-0.6b"
+                elif self.engine == "whisper.cpp":
+                    active_model = "small-q5_0"
+                elif self.device == "cpu":
+                    active_model = "base" if self.hw["ram_gb"] >= 16 else "small"
+                else:
+                    active_model = "medium"
                 beam_size = 1
             elif performance_mode == "balanced":
                 is_best_whisper_cpp = self.engine == "whisper.cpp"
@@ -338,10 +415,15 @@ class TranscriptionService:
                     beam_size = 3 if is_large else 1
 
             active_model = self._normalize_model_name_for_engine(active_model)
-            is_qwen3 = active_model and "qwen3" in active_model.lower()
-            is_whisper_cpp = self.engine == "whisper.cpp" and not is_qwen3
+            is_sensevoice = active_model and "sensevoice" in active_model.lower()
+            is_qwen3 = active_model and "qwen3" in active_model.lower() and not is_sensevoice
+            is_whisper_cpp = self.engine == "whisper.cpp" and not is_qwen3 and not is_sensevoice
 
-            if is_qwen3:
+            if is_sensevoice:
+                _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
+                engine = self._ensure_engine("sensevoice", self.sensevoice_engine)
+                engine.load(active_model, progress_cb)
+            elif is_qwen3:
                 _progress(progress_cb, 8, "モデル読み込み中... / Loading AI model...")
                 engine = self._ensure_engine("qwen", self.qwen_engine)
                 engine.load(active_model)
@@ -358,28 +440,39 @@ class TranscriptionService:
                 engine = self._ensure_engine("whisper", self.whisper_engine)
                 engine.load(active_model)
 
-            check_pause_cancel(job_id)
+            check_pause_cancel(job_id, release_lock=True)
             if is_cancelled(job_id):
                 raise InterruptedError("Job cancelled")
 
             # ── Step 3: Transcribe each chunk ──────────────
             import concurrent.futures
             
-            if is_qwen3 or self.device != "cpu":
+            if is_qwen3 or is_sensevoice or self.device == "cpu":
                 max_workers = 1
             else:
-                max_workers = min(3, n_chunks)
+                max_workers = min(2, n_chunks)
 
             logger.info(f"Starting chunk transcription with max_workers={max_workers}")
             results = [None] * n_chunks
             
             def run_one_chunk(idx):
                 chunk_path, offset = chunks[idx]
-                check_pause_cancel(job_id)
                 if is_cancelled(job_id):
                     raise InterruptedError("Job cancelled")
                 
-                if is_qwen3:
+                if is_sensevoice:
+                    segs = self.sensevoice_engine.transcribe_chunk(
+                        chunk_path=chunk_path,
+                        language=language,
+                        offset=offset,
+                        total_duration=duration,
+                        progress_cb=None,
+                        chunk_idx=idx,
+                        n_chunks=n_chunks,
+                        job_id=job_id,
+                        on_language_detected=on_language_detected if idx == 0 else None,
+                    )
+                elif is_qwen3:
                     segs = self.qwen_engine.transcribe_chunk(
                         chunk_path=chunk_path,
                         offset=offset,
@@ -421,26 +514,49 @@ class TranscriptionService:
             # Execute thread pool
             if max_workers > 1:
                 with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-                    futures = {executor.submit(run_one_chunk, idx): idx for idx in range(n_chunks)}
-                    for fut in concurrent.futures.as_completed(futures):
-                        check_pause_cancel(job_id)
+                    futures = {}
+                    next_chunk_idx = 0
+                    
+                    # Submit initial batch
+                    for _ in range(min(max_workers, n_chunks)):
+                        futures[executor.submit(run_one_chunk, next_chunk_idx)] = next_chunk_idx
+                        next_chunk_idx += 1
+                        
+                    while futures:
+                        check_pause_cancel(job_id, release_lock=True)
                         if is_cancelled(job_id):
                             raise InterruptedError("Job cancelled")
-                        try:
-                            idx, segs = fut.result()
-                            results[idx] = segs
-                            completed = sum(1 for r in results if r is not None)
-                            prog_pct = 10 + int(70 * (completed / n_chunks))
-                            _progress(
-                                progress_cb, prog_pct,
-                                f"文字起こし中 {completed}/{n_chunks}... / Transcribing chunk {completed}/{n_chunks}..."
-                            )
-                        except Exception as e:
-                            logger.error(f"Error transcribing chunk: {e}")
-                            raise e
+                            
+                        # Wait for at least one chunk to finish
+                        done, _ = concurrent.futures.wait(
+                            futures.keys(),
+                            return_when=concurrent.futures.FIRST_COMPLETED
+                        )
+                        
+                        for fut in done:
+                            idx = futures.pop(fut)
+                            try:
+                                _, segs = fut.result()
+                                results[idx] = segs
+                                completed = sum(1 for r in results if r is not None)
+                                prog_pct = 10 + int(70 * (completed / n_chunks))
+                                _progress(
+                                    progress_cb, prog_pct,
+                                    f"文字起こし中 {completed}/{n_chunks}... / Transcribing chunk {completed}/{n_chunks}..."
+                                )
+                            except Exception as e:
+                                logger.error(f"Error transcribing chunk: {e}")
+                                raise e
+                                
+                        # Submit next chunks if not paused
+                        while len(futures) < max_workers and next_chunk_idx < n_chunks:
+                            if is_paused(job_id):
+                                break
+                            futures[executor.submit(run_one_chunk, next_chunk_idx)] = next_chunk_idx
+                            next_chunk_idx += 1
             else:
                 for idx in range(n_chunks):
-                    check_pause_cancel(job_id)
+                    check_pause_cancel(job_id, release_lock=True)
                     if is_cancelled(job_id):
                         raise InterruptedError("Job cancelled")
                     
@@ -458,7 +574,7 @@ class TranscriptionService:
                 if segs:
                     all_segments.extend(segs)
 
-            check_pause_cancel(job_id)
+            check_pause_cancel(job_id, release_lock=True)
             if is_cancelled(job_id):
                 raise InterruptedError("Job cancelled")
 
@@ -470,7 +586,8 @@ class TranscriptionService:
                 num_speakers,
                 diarization_mode,
                 model_name=active_model,
-                speaker_range=speaker_range
+                speaker_range=speaker_range,
+                progress_cb=progress_cb
             )
 
             # ── Step 5: Done ───────────────────────────────
@@ -488,6 +605,7 @@ class TranscriptionService:
         diarization_mode: str = "accurate",
         model_name: Optional[str] = None,
         speaker_range: str = "normal",
+        progress_cb: Optional[Callable] = None,
     ) -> List[Dict]:
         """Route to appropriate speaker diarization engine wrapper."""
         if diarization_mode == "off" or num_speakers == 1 or not segments:
@@ -500,7 +618,7 @@ class TranscriptionService:
         if diarization_mode == "sherpa-onnx":
             engine = self._ensure_engine("sherpa", self.sherpa_engine)
             try:
-                return engine.diarize(wav_path, segments, num_speakers)
+                return engine.diarize(wav_path, segments, num_speakers, progress_cb)
             except Exception as e:
                 logger.warning(f"Sherpa-ONNX diarization failed: {e}. Falling back to Speaker 1.")
                 for seg in segments:
@@ -509,12 +627,17 @@ class TranscriptionService:
                 return segments
         else:
             # Pyannote
-            engine = self._ensure_engine("pyannote", self.pyannote_engine)
             try:
+                engine = self._ensure_engine("pyannote", self.pyannote_engine)
                 engine.load(diarization_mode)
                 return engine.diarize(wav_path, segments, num_speakers, diarization_mode, speaker_range)
             except Exception as e:
-                logger.warning(f"Pyannote diarization failed: {e}. Falling back to Speaker 1.")
+                logger.warning(f"Pyannote diarization failed: {e}. Attempting Sherpa-ONNX fallback.")
+                try:
+                    engine_sherpa = self._ensure_engine("sherpa", self.sherpa_engine)
+                    return engine_sherpa.diarize(wav_path, segments, num_speakers, progress_cb)
+                except Exception as sherpa_e:
+                    logger.warning(f"Sherpa-ONNX fallback also failed: {sherpa_e}. Falling back to Speaker 1.")
                 for seg in segments:
                     seg["speaker"] = "Speaker 1"
                     seg.pop("words", None)

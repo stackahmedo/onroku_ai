@@ -124,8 +124,8 @@ app.add_middleware(
 _PROGRESS: dict[str, dict] = {}
 
 # Thread lock to guarantee sequential background task execution
-import threading
-transcription_lock = threading.Lock()
+from engines.base import transcription_lock
+
 
 
 @app.on_event("startup")
@@ -145,7 +145,7 @@ async def health():
 @app.get("/hardware")
 @app.head("/hardware")
 async def hardware():
-    return HARDWARE
+    return transcription_service.hw
 
 
 @app.post("/clear-cache")
@@ -258,21 +258,44 @@ async def upload_audio(
 
         from hardware_detector import select_best_engine
         best_cfg = select_best_engine(HARDWARE)
-        runtime_prefers_whisper_cpp = transcription_service.engine == "whisper.cpp"
+        runtime_engine = transcription_service.engine
+        runtime_device = transcription_service.device
         base_model = model if model and model != "auto" else best_cfg["model"]
-        if not runtime_prefers_whisper_cpp and isinstance(base_model, str) and base_model.endswith("-q5_0"):
+        if runtime_engine != "whisper.cpp" and isinstance(base_model, str) and base_model.endswith("-q5_0"):
             base_model = base_model[:-5]
-        
-        if performance_mode == "eco":
+
+        if "sensevoice" in base_model.lower():
+            actual_model_name = "sensevoice"
+        elif performance_mode == "eco":
             actual_model_name = "small" if "qwen" not in base_model.lower() else "qwen3-asr-0.6b"
-        elif performance_mode == "balanced":
-            is_best_whisper_cpp = runtime_prefers_whisper_cpp
-            actual_model_name = "medium-q5_0" if is_best_whisper_cpp else "medium"
+        elif performance_mode == "fast":
             if "qwen" in base_model.lower():
                 actual_model_name = "qwen3-asr-0.6b"
+            elif runtime_engine == "whisper.cpp":
+                actual_model_name = "small-q5_0"
+            elif runtime_device == "cpu":
+                actual_model_name = "base" if HARDWARE["ram_gb"] >= 16 else "small"
+            else:
+                actual_model_name = "medium"
+        elif performance_mode == "balanced":
+            if "qwen" in base_model.lower():
+                actual_model_name = "qwen3-asr-0.6b"
+            elif runtime_engine == "whisper.cpp":
+                actual_model_name = "medium-q5_0" if HARDWARE["ram_gb"] >= 16 else "small-q5_0"
+            elif runtime_device == "cpu":
+                actual_model_name = "small"
+            else:
+                actual_model_name = "medium"
         elif performance_mode == "accurate":
-            actual_model_name = "large-v3" if "qwen" not in base_model.lower() else "qwen3-asr-1.7b"
-        else: # "auto"
+            if "qwen" in base_model.lower():
+                actual_model_name = "qwen3-asr-1.7b"
+            elif runtime_engine == "whisper.cpp":
+                actual_model_name = "medium-q5_0" if HARDWARE["ram_gb"] >= 16 else "small-q5_0"
+            elif runtime_device == "cpu":
+                actual_model_name = "medium" if HARDWARE["ram_gb"] >= 16 else "small"
+            else:
+                actual_model_name = "large-v3"
+        else:  # "auto"
             actual_model_name = base_model
 
         job_id = db_service.create_job(
@@ -286,6 +309,11 @@ async def upload_audio(
         )
 
         _PROGRESS[job_id] = {"pct": 0, "label": "待機中... / Waiting..."}
+        logger.info(
+            f"Job {job_id}: selected runtime engine={transcription_service.engine}, "
+            f"device={transcription_service.device}, compute_type={transcription_service.compute_type}, "
+            f"model={actual_model_name}, performance_mode={performance_mode}"
+        )
         background_tasks.add_task(
             _run_transcription,
             job_id,
@@ -305,8 +333,11 @@ async def upload_audio(
             "file_id": file_id,
             "filename": file.filename,
             "status": "processing",
-            "hardware_tier": HARDWARE["tier"],
+            "hardware_tier": transcription_service.hw.get("tier", HARDWARE["tier"]),
             "model_name": actual_model_name,
+            "runtime_engine": transcription_service.engine,
+            "runtime_device": transcription_service.device,
+            "runtime_compute_type": transcription_service.compute_type,
             "file_size_bytes": file_size_bytes,
         }
 
@@ -364,7 +395,10 @@ def _run_transcription(
 
     with transcription_lock:
         from transcription_service import is_cancelled
-        if is_cancelled(job_id):
+        from engines.base import check_pause_cancel
+        try:
+            check_pause_cancel(job_id, release_lock=True)
+        except InterruptedError:
             db_service.update_job_status(job_id, "cancelled")
             _progress_cb(0, "キャンセル済み / Cancelled")
             return

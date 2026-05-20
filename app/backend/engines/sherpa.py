@@ -6,8 +6,8 @@ import logging
 import os
 import re
 from pathlib import Path
-from typing import Dict, List, Optional
-from .base import _assign_speaker
+from typing import Callable, Dict, List, Optional
+from .base import _assign_speaker, _progress
 
 logger = logging.getLogger(__name__)
 
@@ -16,11 +16,67 @@ class SherpaDiarizationEngine:
     def __init__(self, hw: Dict):
         self.hw = hw
 
+    def download_models(self, progress_cb: Optional[Callable] = None):
+        """Download Sherpa-ONNX diarization models from Hugging Face if not present."""
+        model_dir = Path(__file__).parent.parent.parent.parent / "app" / "models" / "sherpa-onnx"
+        seg_dir = model_dir / "sherpa-onnx-pyannote-segmentation-3-0"
+        seg_dir.mkdir(parents=True, exist_ok=True)
+        
+        segmentation_model = seg_dir / "model.onnx"
+        embedding_model = model_dir / "3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+        
+        import requests
+        
+        # 1. Download segmentation model if missing
+        if not segmentation_model.exists():
+            url_seg = "https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0/resolve/main/model.onnx"
+            logger.info(f"Downloading Sherpa segmentation model from {url_seg}...")
+            _progress(progress_cb, 83, "話者分離モデルダウンロード中... / Downloading speaker segmentation model...")
+            
+            response = requests.get(url_seg, stream=True)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to download segmentation model: HTTP {response.status_code}")
+                
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            with open(segmentation_model, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0 and progress_cb:
+                            pct = 83 + int(5 * (downloaded / total_size)) # 83% - 88%
+                            _progress(progress_cb, pct, f"話者分離モデルダウンロード中 ({downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB)...")
+            logger.info("Segmentation model downloaded successfully.")
+
+        # 2. Download embedding model if missing
+        if not embedding_model.exists():
+            url_emb = "https://huggingface.co/csukuangfj/speaker-embedding-models/resolve/main/3dspeaker_speech_eres2net_base_sv_zh-cn_3dspeaker_16k.onnx"
+            logger.info(f"Downloading Sherpa embedding model from {url_emb}...")
+            _progress(progress_cb, 88, "話者埋め込みモデルダウンロード中... / Downloading speaker embedding model...")
+            
+            response = requests.get(url_emb, stream=True)
+            if response.status_code != 200:
+                raise RuntimeError(f"Failed to download embedding model: HTTP {response.status_code}")
+                
+            total_size = int(response.headers.get("content-length", 0))
+            downloaded = 0
+            with open(embedding_model, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0 and progress_cb:
+                            pct = 88 + int(10 * (downloaded / total_size)) # 88% - 98%
+                            _progress(progress_cb, pct, f"話者埋め込みモデルダウンロード中 ({downloaded//(1024*1024)}MB / {total_size//(1024*1024)}MB)...")
+            logger.info("Embedding model downloaded successfully.")
+
     def diarize(
         self,
         wav_path: str,
         segments: List[Dict],
         num_speakers: Optional[int] = None,
+        progress_cb: Optional[Callable] = None,
     ) -> List[Dict]:
         """Perform speaker diarization using Sherpa-ONNX offline engine."""
         try:
@@ -30,6 +86,9 @@ class SherpaDiarizationEngine:
         except ImportError as e:
             logger.error(f"sherpa_onnx or soundfile library not installed: {e}. Please run pip install sherpa-onnx.")
             raise e
+
+        # Ensure models are downloaded before executing
+        self.download_models(progress_cb)
 
         model_dir = Path(__file__).parent.parent.parent.parent / "app" / "models" / "sherpa-onnx"
         segmentation_model = str(model_dir / "sherpa-onnx-pyannote-segmentation-3-0" / "model.onnx")
@@ -81,8 +140,11 @@ class SherpaDiarizationEngine:
             })
 
         if not speaker_segments:
-            logger.warning("Sherpa-ONNX diarization failed or returned no speaker tracks.")
-            return []
+            logger.warning("Sherpa-ONNX diarization failed or returned no speaker tracks. Falling back to Speaker 1.")
+            for seg in segments:
+                seg["speaker"] = "Speaker 1"
+                seg.pop("words", None)
+            return segments
 
         first_text = segments[0]["text"] if segments else ""
         is_english = bool(re.search(r'[a-zA-Z]', first_text))

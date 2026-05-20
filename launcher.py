@@ -19,7 +19,13 @@ PROJECT_DIR  = Path(__file__).parent.absolute()
 BACKEND_DIR  = PROJECT_DIR / "app" / "backend"
 # Try V2 venv first, then fall back to V1 venv (which has all packages)
 V1_PYTHON    = Path(r"i:\smart_grid_home\projects\transcript_ai\venv\Scripts\python.exe")
-VENV_PYTHON  = PROJECT_DIR / "venv" / "Scripts" / "python.exe"
+if os.name == "nt":
+    VENV_PYTHON  = PROJECT_DIR / "venv" / "Scripts" / "python.exe"
+else:
+    VENV_PYTHON  = PROJECT_DIR / "venv" / "bin" / "python"
+    if not VENV_PYTHON.exists():
+        VENV_PYTHON  = PROJECT_DIR / "venv" / "bin" / "python3"
+
 PYTHON       = str(VENV_PYTHON) if VENV_PYTHON.exists() else (str(V1_PYTHON) if V1_PYTHON.exists() else sys.executable)
 NPM          = "npm.cmd" if os.name == "nt" else "npm"
 import sys

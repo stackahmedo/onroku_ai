@@ -7,6 +7,8 @@ Whisper model, chunk size, compute type, and thread count.
 import logging
 import psutil
 import os
+import shutil
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +62,12 @@ def detect_hardware() -> dict:
     is_windows = platform.system() == "Windows"
     is_mac = platform.system() == "Darwin"
 
+    app_root = Path(__file__).resolve().parent.parent
+    bin_dir = app_root / "bin"
+    binary_name = "whisper-cli.exe" if is_windows else "whisper-cli"
+    whisper_cli_local = bin_dir / binary_name
+    whisper_cpp_available = shutil.which(binary_name) is not None or whisper_cli_local.exists()
+
     try:
         import torch
         gpu_available = torch.cuda.is_available()
@@ -75,8 +83,8 @@ def detect_hardware() -> dict:
             if "Apple" in cpu_name:
                 gpu_name = cpu_name  # e.g. "Apple M4"
                 gpu_type = "apple_silicon"
-                gpu_available = True  # Hardware acceleration is available!
-                engine = "whisper.cpp"
+                gpu_available = whisper_cpp_available
+                engine = "whisper.cpp" if whisper_cpp_available else "faster-whisper"
         elif is_windows:
             # Fallback for non-NVIDIA cards (AMD / Intel) so they are displayed correctly!
             import subprocess
@@ -90,8 +98,8 @@ def detect_hardware() -> dict:
                 if valid_gpus:
                     gpu_name = valid_gpus[0]
                     gpu_type = "amd_intel"
-                    gpu_available = True
-                    engine = "whisper.cpp"
+                    gpu_available = whisper_cpp_available
+                    engine = "whisper.cpp" if whisper_cpp_available else "faster-whisper"
             except Exception:
                 pass
     except Exception as e:
@@ -120,38 +128,70 @@ def detect_hardware() -> dict:
             compute_type = "float16"
             chunk_seconds = 0
             threads = min(cpu_cores, 2)
-    elif gpu_type == "apple_silicon":
-        # Apple Silicon unified memory
+    elif gpu_type == "apple_silicon" and engine == "whisper.cpp":
+        # Apple Silicon unified memory accelerated by whisper.cpp/CoreML
         if ram_gb >= 16:
             tier = "heavy"
             device = "coreml"
-            model_name = "large-v3"
+            model_name = "medium"
             compute_type = "float16"
             chunk_seconds = 0
             threads = min(cpu_cores, 8)
         else:
             tier = "medium"
             device = "coreml"
+            model_name = "small"
+            compute_type = "float16"
+            chunk_seconds = 0
+            threads = min(cpu_cores, 4)
+    elif gpu_type == "apple_silicon":
+        # Apple Silicon fallback to CPU-only if whisper.cpp is not available
+        device = "cpu"
+        engine = "faster-whisper"
+        if ram_gb >= 16:
+            tier = "medium"
+            model_name = "base"
+            compute_type = "int8"
+            chunk_seconds = 0
+            threads = min(cpu_cores, 4)
+        else:
+            tier = "light"
+            model_name = "small"
+            compute_type = "int8"
+            chunk_seconds = 0
+            threads = min(cpu_cores, 2)
+    elif gpu_type == "amd_intel" and engine == "whisper.cpp":
+        # AMD / Intel GPU running on Vulkan (whisper.cpp only)
+        if ram_gb >= 16:
+            tier = "heavy"
+            device = "vulkan"
+            model_name = "medium"
+            compute_type = "float16"
+            chunk_seconds = 0
+            threads = min(cpu_cores, 8)
+        else:
+            tier = "medium"
+            device = "vulkan"
             model_name = "small"
             compute_type = "float16"
             chunk_seconds = 0
             threads = min(cpu_cores, 4)
     elif gpu_type == "amd_intel":
-        # AMD / Intel GPU running on Vulkan
+        # AMD / Intel fallback to CPU-only if whisper.cpp is not available
+        device = "cpu"
+        engine = "faster-whisper"
         if ram_gb >= 16:
-            tier = "heavy"
-            device = "vulkan"
-            model_name = "large-v3"
-            compute_type = "float16"
-            chunk_seconds = 0
-            threads = min(cpu_cores, 8)
-        else:
             tier = "medium"
-            device = "vulkan"
-            model_name = "small"
-            compute_type = "float16"
+            model_name = "base"
+            compute_type = "int8"
             chunk_seconds = 0
             threads = min(cpu_cores, 4)
+        else:
+            tier = "light"
+            model_name = "small"
+            compute_type = "int8"
+            chunk_seconds = 0
+            threads = min(cpu_cores, 2)
     else:
         # CPU-only fallback
         device = "cpu"
@@ -202,8 +242,11 @@ def select_best_engine(hw: dict) -> dict:
     gpu_vram_gb = hw.get("gpu_vram_gb", 0.0) or 0.0
     ram_gb = hw.get("ram_gb", 8.0)
 
+    asr_engine = hw.get("engine", "faster-whisper")
+    asr_device = hw.get("device", "cpu")
+
     # 1. NVIDIA GPU (CUDA)
-    if gpu_type == "nvidia" and gpu_vram_gb >= 4.0:
+    if asr_engine == "faster-whisper" and asr_device == "cuda" and gpu_vram_gb >= 4.0:
         return {
             "asr_engine": "faster-whisper",
             "asr_device": "cuda",
@@ -214,42 +257,39 @@ def select_best_engine(hw: dict) -> dict:
             "beam_size": 1,
         }
 
-    # 2. Apple Silicon (Metal/CoreML)
-    elif gpu_type == "apple_silicon":
-        return {
-            "asr_engine": "whisper.cpp",
-            "asr_device": "coreml",
-            "model": "small",
-            "compute_type": "float16",
-            "speaker_engine": "pyannote",
-            "speaker_device": "cpu",
-            "beam_size": 1,
-        }
+    # 2. Apple Silicon / AMD / Intel using whisper.cpp
+    if asr_engine == "whisper.cpp":
+        if gpu_type == "apple_silicon":
+            return {
+                "asr_engine": "whisper.cpp",
+                "asr_device": "coreml",
+                "model": "small",
+                "compute_type": "float16",
+                "speaker_engine": "pyannote",
+                "speaker_device": "cpu",
+                "beam_size": 1,
+            }
+        if gpu_type == "amd_intel":
+            model = "medium-q5_0" if ram_gb >= 16.0 else "small-q5_0"
+            return {
+                "asr_engine": "whisper.cpp",
+                "asr_device": "vulkan",
+                "model": model,
+                "compute_type": "float16",
+                "speaker_engine": "pyannote",
+                "speaker_device": "cpu",
+                "beam_size": 1,
+            }
 
-    # 3. AMD / Intel GPU (Vulkan)
-    elif gpu_type == "amd_intel":
-        # Vulkan supports GGML medium or small models
-        model = "medium-q5_0" if ram_gb >= 16.0 else "small-q5_0"
-        return {
-            "asr_engine": "whisper.cpp",
-            "asr_device": "vulkan",
-            "model": model,
-            "compute_type": "float16",
-            "speaker_engine": "pyannote",
-            "speaker_device": "cpu",
-            "beam_size": 1,
-        }
-
-    # 4. CPU Only / Fallback
-    else:
-        model = "base" if ram_gb >= 16.0 else "small"
-        return {
-            "asr_engine": "faster-whisper",
-            "asr_device": "cpu",
-            "model": model,
-            "compute_type": "int8",
-            "speaker_engine": "pyannote",
-            "speaker_device": "cpu",
-            "beam_size": 1,
-        }
+    # 3. CPU Only / Fallback
+    model = "base" if ram_gb >= 16.0 else "small"
+    return {
+        "asr_engine": "faster-whisper",
+        "asr_device": "cpu",
+        "model": model,
+        "compute_type": "int8",
+        "speaker_engine": "pyannote",
+        "speaker_device": "cpu",
+        "beam_size": 1,
+    }
 

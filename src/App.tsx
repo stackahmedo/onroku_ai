@@ -1057,6 +1057,7 @@ export default function App() {
                 <option value="tiny">Whisper tiny</option>
                 <option value="qwen3-asr-0.6b">{t.modelQwen3Asr06b || "Qwen3-ASR 0.6B"}</option>
                 <option value="qwen3-asr-1.7b">{t.modelQwen3Asr17b || "Qwen3-ASR 1.7B"}</option>
+                <option value="sensevoice">{t.modelSenseVoice || "SenseVoice (Sherpa-ONNX)"}</option>
               </select>
             </div>
 
@@ -1072,6 +1073,7 @@ export default function App() {
                 onChange={e => setPerformanceMode(e.target.value)}
               >
                 <option value="auto">⚡ {t.performanceModeAuto || 'Recommended (Auto)'}</option>
+                <option value="fast">⚡⚡ {t.performanceModeFast || 'Fast (Lower latency)'}</option>
                 <option value="eco">🍃 {t.performanceModeEco || 'Eco (Low VRAM/Threads)'}</option>
                 <option value="balanced">⚖️ {t.performanceModeBalanced || 'Balanced (Standard)'}</option>
                 <option value="accurate">🎯 {t.performanceModeAccurate || 'Accurate (Max Precision)'}</option>

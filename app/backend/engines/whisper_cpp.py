@@ -99,10 +99,51 @@ class WhisperCppEngine:
                 if os.name == "nt":
                     kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
                 
-                result = subprocess.run(cmd, capture_output=True, text=True, **kwargs)
+                proc = subprocess.Popen(
+                    cmd,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    **kwargs
+                )
                 
-                if result.returncode != 0:
-                    logger.error(f"whisper.cpp process failed with code {result.returncode}:\n{result.stderr}")
+                # Poll the process until it completes, checking for pause/cancel
+                while proc.poll() is None:
+                    if is_cancelled(job_id):
+                        logger.info(f"Cancellation requested. Terminating whisper-cli process {proc.pid}...")
+                        proc.terminate()
+                        try:
+                            proc.wait(timeout=2)
+                        except subprocess.TimeoutExpired:
+                            proc.kill()
+                        raise InterruptedError("Job cancelled")
+                        
+                    if is_paused(job_id):
+                        try:
+                            import psutil
+                            p = psutil.Process(proc.pid)
+                            p.suspend()
+                            logger.info(f"Suspended whisper-cli process {proc.pid}")
+                            while is_paused(job_id):
+                                if is_cancelled(job_id):
+                                    proc.terminate()
+                                    raise InterruptedError("Job cancelled while paused")
+                                time.sleep(0.5)
+                            p.resume()
+                            logger.info(f"Resumed whisper-cli process {proc.pid}")
+                        except Exception as e:
+                            logger.warning(f"Could not suspend/resume whisper-cli process: {e}")
+                            while is_paused(job_id):
+                                if is_cancelled(job_id):
+                                    proc.terminate()
+                                    raise InterruptedError("Job cancelled while paused")
+                                time.sleep(0.5)
+                    time.sleep(0.5)
+                
+                stdout, stderr = proc.communicate()
+                
+                if proc.returncode != 0:
+                    logger.error(f"whisper.cpp process failed with code {proc.returncode}:\n{stderr}")
                     return []
                 
                 json_file = Path(tmpdir) / "output.json"
